@@ -1,0 +1,33 @@
+# Package manifest for ML-EcoLyzer
+
+# Core documentation
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+
+# Configuration examples
+recursive-include examples *.yaml *.yml *.py
+
+# Documentation
+recursive-include docs *.md *.rst *.txt
+
+# Configuration files
+recursive-include mlecolyzer *.yaml *.yml *.json
+
+# Exclude development files
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude tox.ini
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * *.so
+recursive-exclude * .DS_Store
+
+# Exclude test files from distribution
+recursive-exclude tests *
+
+# Exclude build artifacts
+exclude build
+exclude dist
+exclude *.egg-info
