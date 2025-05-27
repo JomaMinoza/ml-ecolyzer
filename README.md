@@ -436,11 +436,11 @@ See our [Contributing Guide](CONTRIBUTING.md) for research collaboration guideli
 If you use ML-EcoLyzer in your research, please cite our paper:
 
 ```bibtex
-@inproceedings{mlecolyzer2024,
+@inproceedings{mlecolyzer2025,
   title={ML-EcoLyzer: Comprehensive Environmental Impact Analysis for Machine Learning Systems},
-  author={ML-EcoLyzer Research Team},
-  booktitle={Conference on Neural Information Processing Systems (NeurIPS)},
-  year={2024},
+  author={Minoza, Jose Marie Antonio and Laylo, Rex Gregor and Villarin, Christian and Ibanez, Sebastian},
+  booktitle={Proceedings of the Asian Conference on Machine Learning (ACML)},
+  year={2025},
   url={https://github.com/ml-ecolyzer/ml-ecolyzer}
 }
 ```
@@ -454,15 +454,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Documentation**: [https://ml-ecolyzer.readthedocs.io](https://ml-ecolyzer.readthedocs.io)
 - **Paper**: [https://arxiv.org/abs/xxxx.xxxxx](https://arxiv.org/abs/xxxx.xxxxx)
 - **PyPI**: [https://pypi.org/project/ml-ecolyzer](https://pypi.org/project/ml-ecolyzer)
-- **GitHub**: [https://github.com/ml-ecolyzer/ml-ecolyzer](https://github.com/ml-ecolyzer/ml-ecolyzer)
-- **Issues**: [https://github.com/ml-ecolyzer/ml-ecolyzer/issues](https://github.com/ml-ecolyzer/ml-ecolyzer/issues)
+- **GitHub**: [https://github.com/JomaMinoza/ml-ecolyzer](https://github.com/JomaMinoza/ml-ecolyzer)
+- **Issues**: [https://github.com/JomaMinoza/ml-ecolyzer/issues](https://github.com/JomaMinoza/ml-ecolyzer/issues)
 
 ## 💬 Support
 
 - **Documentation**: [Comprehensive research documentation](https://ml-ecolyzer.readthedocs.io)
 - **GitHub Issues**: Report bugs, request features, or ask research questions
 - **Research Discussions**: Join our community for methodology discussions
-- **Email**: contact@ml-ecolyzer.org
+- **Email**: contact@cair.ph
 
 ---
 
