@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ml-ecolyzer"
 dynamic = ["version"]
-description = "Machine Learning Environmental Impact Analysis Framework"
+description = "Machine Learning Environmental Impact Analysis Framework supporting HuggingFace, scikit-learn, and PyTorch"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -16,9 +16,13 @@ authors = [
     {name = "Sebastian Ibanez"},
     {name = "Center for AI Research PH", email = "contact@cair.ph"}
 ]
+maintainers = [
+    {name = "Jose Marie Antonio Minoza"},
+]
 keywords = [
     "machine-learning", "ml", "environmental-impact", "carbon-emissions", 
-    "sustainability", "pytorch", "huggingface", "benchmarking"
+    "sustainability", "pytorch", "huggingface", "scikit-learn", "sklearn",
+    "benchmarking", "green-ai", "carbon-footprint", "neural-networks"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -36,62 +40,223 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "Environment :: Console",
     "Environment :: GPU :: NVIDIA CUDA",
+    "Framework :: Jupyter",
+    "Intended Audience :: Education",
+    "Topic :: Scientific/Engineering :: Information Analysis"
 ]
 dependencies = [
-    "torch>=1.9.0",
-    "transformers>=4.20.0",
-    "datasets>=2.0.0",
-    "codecarbon>=2.0.0",
-    "wandb>=0.13.0",
+    # Core dependencies - minimal for basic functionality
     "numpy>=1.21.0",
     "psutil>=5.8.0",
-    "diffusers>=0.10.0",
-    "evaluate>=0.3.0",
-    "sacrebleu>=2.0.0",
+    "codecarbon>=2.0.0",
     "pandas>=1.3.0",
     "tqdm>=4.60.0",
     "pyyaml>=5.4.0",
     "click>=8.0.0",
-    "rich>=12.0.0",
+    "typing-extensions>=4.0.0",
+    
+    # Basic ML framework (lightweight)
+    "scikit-learn>=1.0.0",
+    "joblib>=1.0.0",
 ]
 
 [project.optional-dependencies]
+# HuggingFace framework support
+huggingface = [
+    "torch>=1.9.0",
+    "transformers>=4.20.0",
+    "datasets>=2.0.0",
+    "diffusers>=0.10.0",
+    "evaluate>=0.3.0",
+    "sacrebleu>=2.0.0",
+    "accelerate>=0.20.0",
+]
+
+# scikit-learn extended support
+sklearn = [
+    "scikit-learn>=1.0.0",
+    "imbalanced-learn>=0.8.0",
+    "yellowbrick>=1.4.0",
+    "openpyxl>=3.0.0",
+    "xlrd>=2.0.0",
+]
+
+# PyTorch framework support
+pytorch = [
+    "torch>=1.9.0",
+    "torchvision>=0.10.0",
+    "torchaudio>=0.9.0",
+    "pytorch-lightning>=1.5.0",
+    "torchmetrics>=0.6.0",
+]
+
+# GPU monitoring capabilities
+gpu = [
+    "nvidia-ml-py3>=7.352.0",
+    "pynvml>=11.0.0",
+]
+
+# Audio processing support
+audio = [
+    "librosa>=0.8.0",
+    "soundfile>=0.10.0",
+    "jiwer>=2.0.0",
+    "torchaudio>=0.9.0",
+]
+
+# Computer vision support
+vision = [
+    "opencv-python>=4.5.0",
+    "pillow>=8.0.0",
+    "torchvision>=0.10.0",
+]
+
+# Experiment tracking and monitoring
+tracking = [
+    "wandb>=0.13.0",
+    "rich>=12.0.0",
+]
+
+# Advanced ML metrics and analysis
+metrics = [
+    "sentence-transformers>=2.0.0",
+    "scipy>=1.7.0",
+]
+
+# Visualization and reporting
+visualization = [
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    "plotly>=5.0.0",
+    "ipywidgets>=7.6.0",
+]
+
+# Development dependencies
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
+    "pytest-asyncio>=0.21.0",
     "black>=21.0",
     "flake8>=3.8",
     "isort>=5.0",
     "mypy>=0.900",
     "pre-commit>=2.15.0",
+    "memory-profiler>=0.60.0",
 ]
+
+# Documentation dependencies
 docs = [
     "sphinx>=4.0",
     "sphinx-rtd-theme>=1.0",
     "myst-parser>=0.15",
     "sphinx-autodoc-typehints>=1.12",
+    "nbsphinx>=0.8.0",
+    "jupyter>=1.0.0",
 ]
-gpu = [
-    "nvidia-ml-py3>=7.352.0",
-    "pynvml>=11.0.0",
+
+# Configuration management
+config = [
+    "omegaconf>=2.1.0",
+    "hydra-core>=1.1.0",
 ]
-audio = [
-    "librosa>=0.8.0",
-    "soundfile>=0.10.0",
-    "jiwer>=2.0.0",
+
+# Research and experimentation
+research = [
+    "jupyter>=1.0.0",
+    "notebook>=6.4.0",
+    "ipykernel>=6.0.0",
+    "requests>=2.25.0",
 ]
-vision = [
-    "opencv-python>=4.5.0",
-    "pillow>=8.0.0",
-]
+
+# All framework support (comprehensive installation)
 all = [
+    # HuggingFace
+    "torch>=1.9.0",
+    "transformers>=4.20.0", 
+    "datasets>=2.0.0",
+    "diffusers>=0.10.0",
+    "evaluate>=0.3.0",
+    "sacrebleu>=2.0.0",
+    "accelerate>=0.20.0",
+    
+    # Extended scikit-learn
+    "imbalanced-learn>=0.8.0",
+    "yellowbrick>=1.4.0",
+    "openpyxl>=3.0.0",
+    "xlrd>=2.0.0",
+    
+    # PyTorch ecosystem
+    "torchvision>=0.10.0",
+    "torchaudio>=0.9.0", 
+    "pytorch-lightning>=1.5.0",
+    "torchmetrics>=0.6.0",
+    
+    # GPU monitoring
     "nvidia-ml-py3>=7.352.0",
     "pynvml>=11.0.0",
+    
+    # Audio processing
     "librosa>=0.8.0",
     "soundfile>=0.10.0",
     "jiwer>=2.0.0",
+    
+    # Computer vision
     "opencv-python>=4.5.0",
     "pillow>=8.0.0",
+    
+    # Tracking and monitoring
+    "wandb>=0.13.0",
+    "rich>=12.0.0",
+    
+    # Advanced metrics
+    "sentence-transformers>=2.0.0",
+    "scipy>=1.7.0",
+    
+    # Visualization
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    "plotly>=5.0.0",
+    "ipywidgets>=7.6.0",
+    
+    # Configuration
+    "omegaconf>=2.1.0",
+    
+    # Research tools
+    "jupyter>=1.0.0",
+    "requests>=2.25.0",
+    "memory-profiler>=0.60.0",
+]
+
+# Lightweight installation (minimal dependencies)
+minimal = [
+    "scikit-learn>=1.0.0",
+    "joblib>=1.0.0",
+]
+
+# Text processing focus
+text = [
+    "torch>=1.9.0",
+    "transformers>=4.20.0",
+    "datasets>=2.0.0",
+    "evaluate>=0.3.0",
+    "sacrebleu>=2.0.0",
+]
+
+# Computer vision focus  
+cv = [
+    "torch>=1.9.0",
+    "torchvision>=0.10.0",
+    "opencv-python>=4.5.0",
+    "pillow>=8.0.0",
+]
+
+# Classical ML focus
+classical = [
+    "scikit-learn>=1.0.0",
+    "imbalanced-learn>=0.8.0",
+    "yellowbrick>=1.4.0",
+    "openpyxl>=3.0.0",
+    "xlrd>=2.0.0",
 ]
 
 [project.urls]
@@ -100,6 +265,8 @@ Repository = "https://github.com/ml-ecolyzer/ml-ecolyzer"
 Documentation = "https://ml-ecolyzer.readthedocs.io"
 "Bug Reports" = "https://github.com/ml-ecolyzer/ml-ecolyzer/issues"
 "Paper" = "https://arxiv.org/abs/xxxx.xxxxx"
+"PyPI" = "https://pypi.org/project/ml-ecolyzer"
+"Discussions" = "https://github.com/ml-ecolyzer/ml-ecolyzer/discussions"
 
 [project.scripts]
 mlecolyzer = "mlecolyzer.cli.main:main"
@@ -111,10 +278,17 @@ write_to = "mlecolyzer/_version.py"
 
 [tool.setuptools.packages.find]
 include = ["mlecolyzer*"]
-exclude = ["tests*"]
+exclude = ["tests*", "docs*", "examples*"]
 
 [tool.setuptools.package-data]
-mlecolyzer = ["*.yaml", "*.yml", "*.json", "configs/**/*"]
+mlecolyzer = [
+    "*.yaml", 
+    "*.yml", 
+    "*.json", 
+    "configs/**/*",
+    "examples/**/*",
+    "templates/**/*"
+]
 
 [tool.black]
 line-length = 88
@@ -131,6 +305,7 @@ extend-exclude = '''
   | \.venv
   | build
   | dist
+  | docs
 )/
 '''
 
@@ -142,6 +317,11 @@ include_trailing_comma = true
 force_grid_wrap = 0
 use_parentheses = true
 ensure_newline_before_comments = true
+known_first_party = ["mlecolyzer"]
+known_third_party = [
+    "torch", "transformers", "datasets", "sklearn", 
+    "numpy", "pandas", "matplotlib", "wandb", "codecarbon"
+]
 
 [tool.mypy]
 python_version = "3.8"
@@ -158,6 +338,24 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 
+# Framework-specific ignores
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "transformers.*", 
+    "datasets.*",
+    "sklearn.*",
+    "codecarbon.*",
+    "wandb.*",
+    "diffusers.*",
+    "torchvision.*",
+    "librosa.*",
+    "jiwer.*",
+    "sacrebleu.*",
+    "sentence_transformers.*"
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q --strict-markers --strict-config"
@@ -169,6 +367,15 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "gpu: marks tests that require GPU",
+    "huggingface: marks tests that require HuggingFace",
+    "sklearn: marks tests that require scikit-learn", 
+    "pytorch: marks tests that require PyTorch",
+    "multiframework: marks tests that require multiple frameworks",
+]
+filterwarnings = [
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
 ]
 
 [tool.coverage.run]
@@ -177,6 +384,7 @@ omit = [
     "*/tests/*",
     "*/test_*",
     "setup.py",
+    "mlecolyzer/_version.py",
 ]
 
 [tool.coverage.report]
@@ -191,4 +399,35 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+    "except ImportError:",
+    "HAS_.*= False",
 ]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",  # whitespace before ':'
+    "E501",  # line too long (handled by black)
+    "W503",  # line break before binary operator
+]
+per-file-ignores = [
+    "__init__.py:F401",  # unused imports in __init__.py
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "docs"]
+skips = ["B101", "B601"]  # Skip assert usage and shell injection (for tests)
+
+[tool.pylint]
+max-line-length = 88
+disable = [
+    "C0103",  # invalid-name
+    "R0903",  # too-few-public-methods
+    "R0913",  # too-many-arguments  
+    "W0613",  # unused-argument
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "1.0.0"
+tag_format = "v$major.$minor.$patch"

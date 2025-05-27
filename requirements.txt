@@ -1,8 +1,16 @@
-# Core ML frameworks
+# Core ML frameworks - HuggingFace
 torch>=1.9.0
 transformers>=4.20.0
 datasets>=2.0.0
 diffusers>=0.10.0
+
+# scikit-learn framework
+scikit-learn>=1.0.0
+joblib>=1.0.0
+
+# PyTorch ecosystem
+torchvision>=0.10.0
+torchaudio>=0.9.0
 
 # Environmental monitoring
 codecarbon>=2.0.0
@@ -57,3 +65,24 @@ requests>=2.25.0
 matplotlib>=3.5.0
 seaborn>=0.11.0
 plotly>=5.0.0
+
+# Advanced ML metrics (optional)
+sentence-transformers>=2.0.0
+
+# File format support
+openpyxl>=3.0.0  # For Excel files
+xlrd>=2.0.0      # For older Excel files
+
+# Additional sklearn utilities
+imbalanced-learn>=0.8.0  # For handling imbalanced datasets
+yellowbrick>=1.4.0       # For ML visualization
+
+# PyTorch utilities
+pytorch-lightning>=1.5.0  # For PyTorch training framework
+torchmetrics>=0.6.0       # For PyTorch metrics
+
+# Memory profiling (optional)
+memory-profiler>=0.60.0
+
+# Progress bars and UI
+ipywidgets>=7.6.0  # For Jupyter notebook widgets

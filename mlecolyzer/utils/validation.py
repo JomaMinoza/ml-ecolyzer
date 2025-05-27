@@ -1,7 +1,8 @@
 """
 Configuration Validation Module
 
-This module provides comprehensive validation for GenBench configurations.
+This module provides comprehensive validation for ML-EcoLyzer configurations
+supporting HuggingFace, scikit-learn, and PyTorch frameworks.
 """
 
 from typing import Dict, Any, List, Optional
@@ -10,7 +11,7 @@ import os
 
 def validate_config(config: Dict[str, Any]) -> None:
     """
-    Validate GenBench configuration dictionary
+    Validate ML-EcoLyzer configuration dictionary
     
     Args:
         config: Configuration dictionary to validate
@@ -48,6 +49,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     
     # Hardware configuration validation
     validate_hardware_config(config)
+    
+    # Framework compatibility validation
+    validate_framework_compatibility(config)
 
 
 def validate_project_name(project_name: str) -> None:
@@ -119,10 +123,19 @@ def validate_single_model_config(model: Dict[str, Any], index: int) -> None:
     if not isinstance(model["name"], str) or not model["name"].strip():
         raise ValueError(f"Model {index} name must be a non-empty string")
     
+    # Validate framework
+    framework = model.get("framework", "huggingface")
+    valid_frameworks = ["huggingface", "sklearn", "pytorch"]
+    if framework not in valid_frameworks:
+        raise ValueError(f"Model {index} framework '{framework}' not in valid frameworks: {valid_frameworks}")
+    
     # Validate task type
-    valid_tasks = ["text", "image", "image_generation", "audio"]
+    valid_tasks = ["text", "image", "image_generation", "audio", "classification", "regression"]
     if model["task"] not in valid_tasks:
         raise ValueError(f"Model {index} task '{model['task']}' not in valid tasks: {valid_tasks}")
+    
+    # Framework-specific validation
+    validate_framework_specific_model_config(model, index, framework)
     
     # Validate optional fields
     if "model_type" in model and not isinstance(model["model_type"], str):
@@ -135,6 +148,62 @@ def validate_single_model_config(model: Dict[str, Any], index: int) -> None:
     # Validate quantization config if present
     if "quantization" in model:
         validate_quantization_config(model["quantization"], index)
+    
+    # Validate model parameters
+    if "model_params" in model and not isinstance(model["model_params"], dict):
+        raise ValueError(f"Model {index} model_params must be a dictionary")
+
+
+def validate_framework_specific_model_config(model: Dict[str, Any], index: int, framework: str) -> None:
+    """
+    Validate framework-specific model configuration
+    
+    Args:
+        model: Model configuration
+        index: Model index for error messages
+        framework: Framework type
+        
+    Raises:
+        ValueError: If framework-specific configuration is invalid
+    """
+    if framework == "sklearn":
+        # sklearn-specific validation
+        task = model["task"]
+        sklearn_tasks = ["classification", "regression"]
+        if task not in sklearn_tasks:
+            raise ValueError(f"Model {index} sklearn framework only supports tasks: {sklearn_tasks}")
+        
+        # Validate sklearn model names
+        sklearn_models = [
+            "RandomForestClassifier", "RandomForestRegressor",
+            "LogisticRegression", "LinearRegression",
+            "SVC", "SVR", "GaussianNB",
+            "DecisionTreeClassifier", "DecisionTreeRegressor",
+            "KNeighborsClassifier", "KNeighborsRegressor",
+            "MLPClassifier", "MLPRegressor"
+        ]
+        
+        model_name = model["name"]
+        if not model_name.endswith(('.pkl', '.joblib')) and model_name not in sklearn_models:
+            print(f"   ⚠️ Warning: Model {index} '{model_name}' not in known sklearn models: {sklearn_models}")
+    
+    elif framework == "pytorch":
+        # pytorch-specific validation
+        if "model_class" in model and model.get("model_class") is not None:
+            # Custom model class provided - should be callable
+            try:
+                # Check if it's a class (not an instance)
+                if not callable(model["model_class"]):
+                    raise ValueError(f"Model {index} model_class must be callable (a class)")
+            except:
+                pass  # Allow for serialized classes or other formats
+    
+    elif framework == "huggingface":
+        # huggingface-specific validation
+        hf_tasks = ["text", "image", "image_generation", "audio"]
+        task = model["task"]
+        if task not in hf_tasks:
+            raise ValueError(f"Model {index} huggingface framework only supports tasks: {hf_tasks}")
 
 
 def validate_quantization_config(quantization: Dict[str, Any], model_index: int) -> None:
@@ -212,10 +281,19 @@ def validate_single_dataset_config(dataset: Dict[str, Any], index: int) -> None:
     if not isinstance(dataset["name"], str) or not dataset["name"].strip():
         raise ValueError(f"Dataset {index} name must be a non-empty string")
     
+    # Validate framework
+    framework = dataset.get("framework", "huggingface")
+    valid_frameworks = ["huggingface", "sklearn", "pytorch"]
+    if framework not in valid_frameworks:
+        raise ValueError(f"Dataset {index} framework '{framework}' not in valid frameworks: {valid_frameworks}")
+    
     # Validate task type
-    valid_tasks = ["text", "image", "image_generation", "audio"]
+    valid_tasks = ["text", "image", "image_generation", "audio", "classification", "regression"]
     if dataset["task"] not in valid_tasks:
         raise ValueError(f"Dataset {index} task '{dataset['task']}' not in valid tasks: {valid_tasks}")
+    
+    # Framework-specific validation
+    validate_framework_specific_dataset_config(dataset, index, framework)
     
     # Validate optional fields
     if "subset" in dataset and not isinstance(dataset["subset"], str):
@@ -241,6 +319,104 @@ def validate_single_dataset_config(dataset: Dict[str, Any], index: int) -> None:
     
     if "label_key" in dataset and not isinstance(dataset["label_key"], str):
         raise ValueError(f"Dataset {index} label_key must be a string")
+    
+    # Validate data parameters
+    if "data_params" in dataset and not isinstance(dataset["data_params"], dict):
+        raise ValueError(f"Dataset {index} data_params must be a dictionary")
+
+
+def validate_framework_specific_dataset_config(dataset: Dict[str, Any], index: int, framework: str) -> None:
+    """
+    Validate framework-specific dataset configuration
+    
+    Args:
+        dataset: Dataset configuration
+        index: Dataset index for error messages
+        framework: Framework type
+        
+    Raises:
+        ValueError: If framework-specific configuration is invalid
+    """
+    if framework == "sklearn":
+        # sklearn-specific validation
+        task = dataset["task"]
+        sklearn_tasks = ["classification", "regression"]
+        if task not in sklearn_tasks:
+            raise ValueError(f"Dataset {index} sklearn framework only supports tasks: {sklearn_tasks}")
+        
+        # Validate sklearn dataset names
+        sklearn_datasets = [
+            "iris", "wine", "breast_cancer", "diabetes", "boston",
+            "20newsgroups", "fetch_olivetti_faces", "fetch_lfw_people"
+        ]
+        
+        dataset_name = dataset["name"]
+        # Check if it's a file path or sklearn dataset
+        if not (dataset_name.endswith(('.csv', '.xlsx', '.xls', '.pkl', '.joblib')) or 
+                dataset_name in sklearn_datasets or 
+                os.path.exists(dataset_name)):
+            print(f"   ⚠️ Warning: Dataset {index} '{dataset_name}' not in known sklearn datasets: {sklearn_datasets}")
+    
+    elif framework == "pytorch":
+        # pytorch-specific validation
+        torchvision_datasets = [
+            "CIFAR10", "CIFAR100", "MNIST", "FashionMNIST", "ImageNet",
+            "COCO", "VOC", "CelebA", "STL10", "SVHN"
+        ]
+        
+        dataset_name = dataset["name"]
+        # Check if it's a file path or torchvision dataset
+        if not (dataset_name.endswith(('.pt', '.pth', '.csv', '.xlsx', '.xls')) or 
+                dataset_name in torchvision_datasets or 
+                os.path.exists(dataset_name) or
+                "data" in dataset.get("data_params", {})):
+            print(f"   ⚠️ Warning: Dataset {index} '{dataset_name}' not in known PyTorch datasets: {torchvision_datasets}")
+    
+    elif framework == "huggingface":
+        # huggingface-specific validation
+        hf_tasks = ["text", "image", "image_generation", "audio"]
+        task = dataset["task"]
+        if task not in hf_tasks:
+            raise ValueError(f"Dataset {index} huggingface framework only supports tasks: {hf_tasks}")
+
+
+def validate_framework_compatibility(config: Dict[str, Any]) -> None:
+    """
+    Validate that model and dataset frameworks are compatible
+    
+    Args:
+        config: Configuration dictionary
+        
+    Raises:
+        ValueError: If framework combinations are invalid
+    """
+    models = config.get("models", [])
+    datasets = config.get("datasets", [])
+    
+    if not models or not datasets:
+        return  # Skip if no models or datasets
+    
+    compatible_combinations = 0
+    
+    for model in models:
+        model_framework = model.get("framework", "huggingface")
+        model_task = model.get("task", "")
+        
+        for dataset in datasets:
+            dataset_framework = dataset.get("framework", "huggingface")
+            dataset_task = dataset.get("task", "")
+            
+            # Check if frameworks match
+            if model_framework == dataset_framework and model_task == dataset_task:
+                compatible_combinations += 1
+    
+    if compatible_combinations == 0:
+        raise ValueError(
+            "No compatible model-dataset combinations found. "
+            "Models and datasets must have matching frameworks and tasks."
+        )
+    
+    print(f"   ✅ Found {compatible_combinations} compatible model-dataset combinations")
 
 
 def validate_output_dir(output_dir: str) -> None:
@@ -374,14 +550,28 @@ def validate_research_config(config: Dict[str, Any]) -> None:
     if not config.get("models") or not config.get("datasets"):
         raise ValueError("Research configuration must include both models and datasets")
     
-    # Validate that we have multiple combinations for meaningful research
-    total_combinations = len(config["models"]) * len(config["datasets"])
-    if total_combinations < 2:
-        raise ValueError("Research configuration must have at least 2 model-dataset combinations")
+    # Count compatible combinations
+    models = config["models"]
+    datasets = config["datasets"]
+    
+    compatible_combinations = 0
+    for model in models:
+        model_framework = model.get("framework", "huggingface")
+        model_task = model.get("task", "")
+        
+        for dataset in datasets:
+            dataset_framework = dataset.get("framework", "huggingface")
+            dataset_task = dataset.get("task", "")
+            
+            if model_framework == dataset_framework and model_task == dataset_task:
+                compatible_combinations += 1
+    
+    if compatible_combinations < 2:
+        raise ValueError("Research configuration must have at least 2 compatible model-dataset combinations")
     
     # Warn about large research configurations
-    if total_combinations > 50:
-        print(f"⚠️ Warning: Large research configuration with {total_combinations} combinations")
+    if compatible_combinations > 50:
+        print(f"⚠️ Warning: Large research configuration with {compatible_combinations} combinations")
         print("   This may take a very long time to complete")
 
 
@@ -432,11 +622,33 @@ def get_config_summary(config: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Summary dictionary with key configuration details
     """
+    # Count compatible combinations
+    models = config.get("models", [])
+    datasets = config.get("datasets", [])
+    
+    compatible_combinations = 0
+    frameworks_used = set()
+    
+    for model in models:
+        model_framework = model.get("framework", "huggingface")
+        model_task = model.get("task", "")
+        frameworks_used.add(model_framework)
+        
+        for dataset in datasets:
+            dataset_framework = dataset.get("framework", "huggingface")
+            dataset_task = dataset.get("task", "")
+            frameworks_used.add(dataset_framework)
+            
+            if model_framework == dataset_framework and model_task == dataset_task:
+                compatible_combinations += 1
+    
     summary = {
         "project": config.get("project", "unknown"),
-        "num_models": len(config.get("models", [])),
-        "num_datasets": len(config.get("datasets", [])),
-        "total_combinations": len(config.get("models", [])) * len(config.get("datasets", [])),
+        "num_models": len(models),
+        "num_datasets": len(datasets),
+        "total_combinations": len(models) * len(datasets),
+        "compatible_combinations": compatible_combinations,
+        "frameworks_used": list(frameworks_used),
         "monitoring_duration": config.get("monitoring_duration", 300),
         "quantization_analysis": config.get("enable_quantization_analysis", True),
         "wandb_enabled": config.get("enable_wandb", "auto"),
@@ -444,12 +656,86 @@ def get_config_summary(config: Dict[str, Any]) -> Dict[str, Any]:
         "output_dir": config.get("output_dir", ".")
     }
     
-    # Add model names
-    if "models" in config:
-        summary["model_names"] = [model.get("name", "unknown") for model in config["models"]]
+    # Add model names by framework
+    model_names_by_framework = {}
+    for model in models:
+        framework = model.get("framework", "huggingface")
+        if framework not in model_names_by_framework:
+            model_names_by_framework[framework] = []
+        model_names_by_framework[framework].append(model.get("name", "unknown"))
+    summary["model_names_by_framework"] = model_names_by_framework
     
-    # Add dataset names
-    if "datasets" in config:
-        summary["dataset_names"] = [dataset.get("name", "unknown") for dataset in config["datasets"]]
+    # Add dataset names by framework
+    dataset_names_by_framework = {}
+    for dataset in datasets:
+        framework = dataset.get("framework", "huggingface")
+        if framework not in dataset_names_by_framework:
+            dataset_names_by_framework[framework] = []
+        dataset_names_by_framework[framework].append(dataset.get("name", "unknown"))
+    summary["dataset_names_by_framework"] = dataset_names_by_framework
     
     return summary
+
+
+def validate_sklearn_dependencies() -> bool:
+    """
+    Validate that sklearn dependencies are available
+    
+    Returns:
+        True if sklearn is available and properly configured
+    """
+    try:
+        import sklearn
+        from sklearn.datasets import load_iris
+        from sklearn.ensemble import RandomForestClassifier
+        
+        # Test basic functionality
+        data = load_iris()
+        model = RandomForestClassifier(n_estimators=2, random_state=42)
+        model.fit(data.data[:10], data.target[:10])
+        
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+
+def validate_pytorch_dependencies() -> bool:
+    """
+    Validate that PyTorch dependencies are available
+    
+    Returns:
+        True if PyTorch is available and properly configured
+    """
+    try:
+        import torch
+        import torchvision
+        
+        # Test basic functionality
+        x = torch.randn(2, 3)
+        y = torch.sum(x)
+        
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+
+def validate_huggingface_dependencies() -> bool:
+    """
+    Validate that HuggingFace dependencies are available
+    
+    Returns:
+        True if HuggingFace is available and properly configured
+    """
+    try:
+        from transformers import AutoTokenizer
+        from datasets import load_dataset
+        
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False

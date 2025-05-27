@@ -1,7 +1,8 @@
 """
 Configuration Classes Module
 
-This module provides structured configuration classes for GenBench.
+This module provides structured configuration classes for ML-EcoLyzer
+supporting HuggingFace, scikit-learn, and PyTorch frameworks.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -12,31 +13,54 @@ from pathlib import Path
 @dataclass
 class ModelConfig:
     """
-    Configuration for a single model
+    Configuration for a single model across multiple frameworks
     
     Attributes:
-        name: Model name (HuggingFace identifier or local path)
-        task: Task type (text, image, image_generation, audio)
+        name: Model name (HuggingFace identifier, sklearn class name, or PyTorch model path/class)
+        task: Task type (text, image, image_generation, audio, classification, regression)
+        framework: Framework type (huggingface, sklearn, pytorch)
         model_type: Specific model type (optional)
         max_length: Maximum sequence length for text models
         quantization: Quantization configuration
+        model_params: Framework-specific model parameters
+        model_class: Custom model class for PyTorch (when using custom models)
+        pretrained: Whether to use pretrained weights (PyTorch)
         custom_args: Additional model-specific arguments
     """
     name: str
     task: str
+    framework: str = "huggingface"
     model_type: Optional[str] = None
     max_length: int = 1024
     quantization: Optional[Dict[str, Any]] = None
+    model_params: Dict[str, Any] = field(default_factory=dict)
+    model_class: Optional[Any] = None
+    pretrained: bool = True
     custom_args: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate configuration after initialization"""
-        valid_tasks = ["text", "image", "image_generation", "audio"]
+        valid_frameworks = ["huggingface", "sklearn", "pytorch"]
+        if self.framework not in valid_frameworks:
+            raise ValueError(f"Invalid framework '{self.framework}'. Must be one of: {valid_frameworks}")
+        
+        valid_tasks = ["text", "image", "image_generation", "audio", "classification", "regression"]
         if self.task not in valid_tasks:
             raise ValueError(f"Invalid task '{self.task}'. Must be one of: {valid_tasks}")
         
         if self.max_length <= 0:
             raise ValueError("max_length must be positive")
+        
+        # Framework-specific validation
+        if self.framework == "sklearn":
+            sklearn_tasks = ["classification", "regression"]
+            if self.task not in sklearn_tasks:
+                raise ValueError(f"sklearn framework only supports tasks: {sklearn_tasks}")
+        
+        elif self.framework == "pytorch":
+            if self.task in ["text", "image_generation"] and not self.model_class:
+                # For complex tasks, might need custom model class
+                pass
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -51,37 +75,61 @@ class ModelConfig:
 @dataclass
 class DatasetConfig:
     """
-    Configuration for a single dataset
+    Configuration for a single dataset across multiple frameworks
     
     Attributes:
-        name: Dataset name (HuggingFace identifier)
-        task: Task type (text, image, image_generation, audio)
+        name: Dataset name (HuggingFace identifier, sklearn dataset name, or file path)
+        task: Task type (text, image, image_generation, audio, classification, regression)
+        framework: Framework type (huggingface, sklearn, pytorch)
         subset: Dataset subset/configuration name
         split: Primary split to load
         fallback_splits: Alternative splits if primary fails
         strict_split: Only use specified split, no fallbacks
         limit: Maximum number of samples to load
         label_key: Key for extracting labels/text from samples
+        target_column: Target column name for file-based datasets
+        feature_columns: Feature column names for file-based datasets
+        file_path: Path to dataset file (for file-based datasets)
+        data_params: Framework-specific dataset parameters
+        transforms: Data transformations (mainly for PyTorch)
+        download: Whether to download dataset if not available
         custom_args: Additional dataset-specific arguments
     """
     name: str
     task: str
+    framework: str = "huggingface"
     subset: Optional[str] = None
     split: str = "test"
     fallback_splits: List[str] = field(default_factory=lambda: ["train", "validation", "dev"])
     strict_split: bool = False
     limit: Optional[int] = None
     label_key: str = "text"
+    target_column: Optional[str] = None
+    feature_columns: Optional[List[str]] = None
+    file_path: Optional[str] = None
+    data_params: Dict[str, Any] = field(default_factory=dict)
+    transforms: Optional[Dict[str, Any]] = None
+    download: bool = True
     custom_args: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate configuration after initialization"""
-        valid_tasks = ["text", "image", "image_generation", "audio"]
+        valid_frameworks = ["huggingface", "sklearn", "pytorch"]
+        if self.framework not in valid_frameworks:
+            raise ValueError(f"Invalid framework '{self.framework}'. Must be one of: {valid_frameworks}")
+        
+        valid_tasks = ["text", "image", "image_generation", "audio", "classification", "regression"]
         if self.task not in valid_tasks:
             raise ValueError(f"Invalid task '{self.task}'. Must be one of: {valid_tasks}")
         
         if self.limit is not None and self.limit <= 0:
             raise ValueError("limit must be positive")
+        
+        # Framework-specific validation
+        if self.framework == "sklearn":
+            sklearn_tasks = ["classification", "regression"]
+            if self.task not in sklearn_tasks:
+                raise ValueError(f"sklearn framework only supports tasks: {sklearn_tasks}")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -172,7 +220,7 @@ class OutputConfig:
         log_level: Logging level
         enable_progress_bars: Show progress bars
     """
-    output_dir: str = "./genbench_results"
+    output_dir: str = "./mlecolyzer_results"
     cache_dir: Optional[str] = None
     emissions_file: str = "emissions.csv"
     save_intermediate: bool = True
@@ -193,9 +241,9 @@ class OutputConfig:
 
 
 @dataclass
-class BenchmarkConfig:
+class AnalysisConfig:
     """
-    Complete benchmark configuration
+    Complete analysis configuration for ML-EcoLyzer
     
     Attributes:
         project: Project name
@@ -244,6 +292,21 @@ class BenchmarkConfig:
         
         if isinstance(self.output, dict):
             self.output = OutputConfig(**self.output)
+        
+        # Validate framework consistency
+        self._validate_framework_consistency()
+    
+    def _validate_framework_consistency(self):
+        """Validate that model and dataset frameworks are compatible"""
+        for model in self.models:
+            for dataset in self.datasets:
+                if model.task != dataset.task:
+                    continue  # Different tasks, will be skipped
+                
+                # Check framework compatibility
+                if model.framework != dataset.framework:
+                    print(f"⚠️ Warning: Framework mismatch between model '{model.name}' ({model.framework}) "
+                          f"and dataset '{dataset.name}' ({dataset.framework})")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -258,7 +321,7 @@ class BenchmarkConfig:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'BenchmarkConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> 'AnalysisConfig':
         """Create from dictionary"""
         # Handle nested configurations
         config_data = data.copy()
@@ -292,7 +355,7 @@ class BenchmarkConfig:
         return cls(**config_data)
     
     @classmethod
-    def from_file(cls, config_path: Union[str, Path]) -> 'BenchmarkConfig':
+    def from_file(cls, config_path: Union[str, Path]) -> 'AnalysisConfig':
         """Load configuration from file"""
         from ..utils.helpers import load_config_from_file
         config_dict = load_config_from_file(config_path)
@@ -303,21 +366,26 @@ class BenchmarkConfig:
         from ..utils.helpers import save_config_to_file
         save_config_to_file(self.to_dict(), config_path, format)
     
-    def add_model(self, name: str, task: str, **kwargs) -> ModelConfig:
+    def add_model(self, name: str, task: str, framework: str = "huggingface", **kwargs) -> ModelConfig:
         """Add a model configuration"""
-        model_config = ModelConfig(name=name, task=task, **kwargs)
+        model_config = ModelConfig(name=name, task=task, framework=framework, **kwargs)
         self.models.append(model_config)
         return model_config
     
-    def add_dataset(self, name: str, task: str, **kwargs) -> DatasetConfig:
+    def add_dataset(self, name: str, task: str, framework: str = "huggingface", **kwargs) -> DatasetConfig:
         """Add a dataset configuration"""
-        dataset_config = DatasetConfig(name=name, task=task, **kwargs)
+        dataset_config = DatasetConfig(name=name, task=task, framework=framework, **kwargs)
         self.datasets.append(dataset_config)
         return dataset_config
     
     def get_total_combinations(self) -> int:
-        """Get total number of model-dataset combinations"""
-        return len(self.models) * len(self.datasets)
+        """Get total number of compatible model-dataset combinations"""
+        compatible_combinations = 0
+        for model in self.models:
+            for dataset in self.datasets:
+                if model.task == dataset.task and model.framework == dataset.framework:
+                    compatible_combinations += 1
+        return compatible_combinations
     
     def estimate_runtime(self, avg_time_per_combination: float = 300) -> Dict[str, float]:
         """Estimate total runtime"""
@@ -338,6 +406,8 @@ class BenchmarkConfig:
             "total_combinations": self.get_total_combinations(),
             "model_names": [model.name for model in self.models],
             "dataset_names": [dataset.name for dataset in self.datasets],
+            "frameworks_used": list(set([model.framework for model in self.models] + 
+                                      [dataset.framework for dataset in self.datasets])),
             "monitoring_duration": self.monitoring.duration_seconds,
             "output_directory": self.output.output_dir,
             "wandb_enabled": self.monitoring.enable_wandb
@@ -345,26 +415,28 @@ class BenchmarkConfig:
 
 
 def create_quick_config(model_name: str, dataset_name: str, task: str = "text", 
-                       project: Optional[str] = None, **kwargs) -> BenchmarkConfig:
+                       framework: str = "huggingface", project: Optional[str] = None, 
+                       **kwargs) -> AnalysisConfig:
     """
-    Create a quick benchmark configuration for single model-dataset pair
+    Create a quick analysis configuration for single model-dataset pair
     
     Args:
-        model_name: Model name (HuggingFace identifier)
-        dataset_name: Dataset name (HuggingFace identifier)
+        model_name: Model name
+        dataset_name: Dataset name
         task: Task type
+        framework: Framework type
         project: Project name (auto-generated if None)
         **kwargs: Additional configuration options
         
     Returns:
-        BenchmarkConfig: Complete configuration
+        AnalysisConfig: Complete configuration
     """
     if project is None:
-        project = f"quick_{model_name.replace('/', '_')}_{dataset_name.replace('/', '_')}"
+        project = f"quick_{framework}_{model_name.replace('/', '_')}_{dataset_name.replace('/', '_')}"
     
-    config = BenchmarkConfig(project=project)
-    config.add_model(model_name, task)
-    config.add_dataset(dataset_name, task, limit=kwargs.get("limit", 100))
+    config = AnalysisConfig(project=project)
+    config.add_model(model_name, task, framework)
+    config.add_dataset(dataset_name, task, framework, limit=kwargs.get("limit", 100))
     
     # Apply additional kwargs
     for key, value in kwargs.items():
@@ -381,7 +453,7 @@ def create_quick_config(model_name: str, dataset_name: str, task: str = "text",
 
 
 def create_research_config(models: List[Dict[str, Any]], datasets: List[Dict[str, Any]], 
-                          project: str, **kwargs) -> BenchmarkConfig:
+                          project: str, **kwargs) -> AnalysisConfig:
     """
     Create a research configuration for comprehensive studies
     
@@ -392,9 +464,9 @@ def create_research_config(models: List[Dict[str, Any]], datasets: List[Dict[str
         **kwargs: Additional configuration options
         
     Returns:
-        BenchmarkConfig: Complete research configuration
+        AnalysisConfig: Complete research configuration
     """
-    config = BenchmarkConfig(project=project)
+    config = AnalysisConfig(project=project)
     
     # Add models
     for model_data in models:
@@ -424,51 +496,71 @@ def create_research_config(models: List[Dict[str, Any]], datasets: List[Dict[str
     return config
 
 
-def load_example_configs() -> Dict[str, BenchmarkConfig]:
+def load_example_configs() -> Dict[str, AnalysisConfig]:
     """
-    Load example configurations for different use cases
+    Load example configurations for different frameworks and use cases
     
     Returns:
         Dictionary of example configurations
     """
     examples = {}
     
-    # Basic text generation benchmark
-    examples["basic_text"] = create_quick_config(
-        "gpt2", "wikitext", "text",
-        project="basic_text_benchmark",
+    # Basic HuggingFace text generation
+    examples["huggingface_text"] = create_quick_config(
+        "gpt2", "wikitext", "text", "huggingface",
+        project="huggingface_text_analysis",
         limit=100
     )
     
-    # Multi-model comparison
-    models = [
-        {"name": "gpt2", "task": "text"},
-        {"name": "distilbert-base-uncased", "task": "text"},
-        {"name": "microsoft/DialoGPT-medium", "task": "text"}
-    ]
-    datasets = [
-        {"name": "wikitext", "subset": "wikitext-2-raw-v1", "task": "text", "limit": 500},
-        {"name": "imdb", "task": "text", "limit": 500}
-    ]
-    examples["model_comparison"] = create_research_config(
-        models, datasets, "model_comparison_study"
+    # sklearn classification
+    examples["sklearn_classification"] = create_quick_config(
+        "RandomForestClassifier", "iris", "classification", "sklearn",
+        project="sklearn_classification_analysis",
+        limit=100
     )
     
-    # Comprehensive research
+    # PyTorch image classification
+    examples["pytorch_image"] = create_quick_config(
+        "resnet18", "CIFAR10", "image", "pytorch",
+        project="pytorch_image_analysis",
+        limit=100
+    )
+    
+    # Multi-framework comparison
+    models = [
+        {"name": "RandomForestClassifier", "task": "classification", "framework": "sklearn"},
+        {"name": "MLPClassifier", "task": "classification", "framework": "sklearn"},
+        {"name": "SVC", "task": "classification", "framework": "sklearn"}
+    ]
+    datasets = [
+        {"name": "iris", "task": "classification", "framework": "sklearn", "limit": 100},
+        {"name": "wine", "task": "classification", "framework": "sklearn", "limit": 100}
+    ]
+    examples["sklearn_comparison"] = create_research_config(
+        models, datasets, "sklearn_model_comparison_study"
+    )
+    
+    # Comprehensive multi-framework research
     research_models = [
-        {"name": "gpt2", "task": "text"},
-        {"name": "microsoft/DialoGPT-medium", "task": "text"},
-        {"name": "facebook/bart-base", "task": "text"}
+        {"name": "gpt2", "task": "text", "framework": "huggingface"},
+        {"name": "RandomForestClassifier", "task": "classification", "framework": "sklearn"},
+        {"name": "resnet18", "task": "image", "framework": "pytorch", "pretrained": True}
     ]
     research_datasets = [
-        {"name": "wikitext", "subset": "wikitext-2-raw-v1", "task": "text", "limit": 1000},
-        {"name": "squad", "task": "text", "limit": 800},
-        {"name": "imdb", "task": "text", "limit": 600}
+        {"name": "wikitext", "task": "text", "framework": "huggingface", "limit": 500},
+        {"name": "iris", "task": "classification", "framework": "sklearn", "limit": 100},
+        {"name": "CIFAR10", "task": "image", "framework": "pytorch", "limit": 200}
     ]
-    examples["comprehensive_research"] = create_research_config(
-        research_models, research_datasets, "comprehensive_carbon_study",
+    examples["multi_framework_research"] = create_research_config(
+        research_models, research_datasets, "comprehensive_multi_framework_study",
         monitoring_duration=900,
         enable_wandb=True
     )
     
     return examples
+
+
+# Backward compatibility aliases
+BenchmarkConfig = AnalysisConfig
+ModelConfig = ModelConfig
+DatasetConfig = DatasetConfig

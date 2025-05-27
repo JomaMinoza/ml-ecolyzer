@@ -1,8 +1,8 @@
 """
-Core GenBench Runner Module
+Core ML-EcoLyzer Runner Module
 
-This module contains the main GenBenchRunner class that orchestrates the comprehensive
-environmental impact benchmarking process.
+This module contains the main EcoLyzer class that orchestrates the comprehensive
+environmental impact analysis process across multiple frameworks.
 """
 
 import time
@@ -15,13 +15,6 @@ import torch
 import numpy as np
 import wandb
 from codecarbon import EmissionsTracker
-from datasets import load_dataset as hf_load_dataset
-from transformers import (
-    AutoTokenizer, AutoModelForCausalLM, AutoFeatureExtractor,
-    AutoModelForImageClassification, AutoProcessor, AutoModelForCTC,
-    AutoModelForAudioClassification
-)
-from diffusers import StableDiffusionPipeline, DiffusionPipeline
 
 # Import our monitoring and utility modules
 from ..monitoring.environmental import AdaptiveEnvironmentalTracker
@@ -38,10 +31,11 @@ class EcoLyzer:
     ML-EcoLyzer: Machine Learning Environmental Impact Analysis Framework
 
     This framework analyzes and quantifies the environmental impact of machine learning 
-    systems with adaptive monitoring that works across all hardware configurations from 
-    high-end GPUs to edge devices.
+    systems with adaptive monitoring that works across all hardware configurations and
+    multiple ML frameworks (HuggingFace, scikit-learn, PyTorch).
 
     Key Features:
+    - Multi-framework support (HuggingFace, scikit-learn, PyTorch)
     - Adaptive hardware detection and monitoring stack initialization
     - Comprehensive environmental metrics (power, thermal, emissions, battery)
     - Scientific quantization analysis with empirical validation
@@ -111,7 +105,7 @@ class EcoLyzer:
 
         # Initialize primary emissions tracker (CodeCarbon)
         self.primary_tracker = EmissionsTracker(
-            project_name=config.get("project", "genbench"),
+            project_name=config.get("project", "mlecolyzer"),
             output_dir=config.get("output_dir", "."),
             output_file=config.get("emissions_file", "emissions.csv")
         )
@@ -139,6 +133,7 @@ class EcoLyzer:
         self._current_dataset_split = ""
         self._current_dataset_size = 0
         self._current_model_name = ""
+        self._current_framework = ""
 
         print(f"✅ EcoLyzer initialized successfully!")
         print(f"   Hardware Category: {self.capabilities.device_category}")
@@ -189,7 +184,7 @@ class EcoLyzer:
         """Initialize wandb with hardware-appropriate configuration"""
         try:
             wandb_config = {
-                "project": self.config.get("project", "genbench"),
+                "project": self.config.get("project", "mlecolyzer"),
                 "config": {
                     **self.config,
                     "hardware_capabilities": {
@@ -249,24 +244,26 @@ class EcoLyzer:
             self.specialized_trackers["quantization"] = True
             print("⚖️ Quantization analysis enabled")
 
-    def load_model(self, model_name: str, task_type: str, model_type: Optional[str] = None) -> Tuple[Any, Any]:
+    def load_model(self, model_name: str, task_type: str, framework: str, 
+                   model_type: Optional[str] = None, **kwargs) -> Tuple[Any, Any]:
         """
         Load model and processor/tokenizer with comprehensive error handling
         """
-        print(f"📥 Loading model: {model_name} for task: {task_type}")
+        print(f"📥 Loading {framework} model: {model_name} for task: {task_type}")
         self._current_model_name = model_name
+        self._current_framework = framework
 
-        return self.model_loader.load_model(model_name, task_type, model_type)
+        return self.model_loader.load_model(model_name, task_type, model_type, framework, **kwargs)
 
-    def load_dataset(self, dataset_name: str, subset: Optional[str] = None,
+    def load_dataset(self, dataset_name: str, framework: str, subset: Optional[str] = None,
                     split: Optional[str] = None, limit: Optional[int] = None,
                     fallback_splits: Optional[List[str]] = None,
-                    strict_split: bool = False):
+                    strict_split: bool = False, **kwargs):
         """
         Load dataset with comprehensive fallback mechanisms and validation
         """
         dataset = self.dataset_loader.load_dataset(
-            dataset_name, subset, split, limit, fallback_splits, strict_split
+            dataset_name, subset, split, limit, fallback_splits, strict_split, framework, **kwargs
         )
 
         # Store metadata
@@ -277,11 +274,11 @@ class EcoLyzer:
         return dataset
 
     def run_inference(self, model: Any, processor: Any, dataset: Any, task: str,
-                     label_key: str, model_name: str) -> Tuple[List[Any], List[Any], Optional[str]]:
+                     label_key: str, model_name: str, framework: str) -> Tuple[List[Any], List[Any], Optional[str]]:
         """
         Run inference on dataset with comprehensive monitoring and error handling
         """
-        print(f"🔄 Running inference on {len(dataset)} samples...")
+        print(f"🔄 Running {framework} inference on {len(dataset)} samples...")
 
         predictions = []
         references = []
@@ -293,7 +290,90 @@ class EcoLyzer:
         }
 
         # Determine model type for specialized handling
-        model_type = self._determine_model_type(model_name, task)
+        model_type = self._determine_model_type(model_name, task, framework)
+
+        # Process samples with progress tracking
+        start_time = time.time()
+
+        # Handle different dataset types
+        if framework == "sklearn":
+            return self._run_sklearn_inference(model, dataset, task, processing_stats)
+        elif framework == "pytorch":
+            return self._run_pytorch_inference(model, dataset, task, processing_stats)
+        else:  # huggingface
+            return self._run_huggingface_inference(model, processor, dataset, task, label_key, 
+                                                  model_name, processing_stats)
+
+    def _run_sklearn_inference(self, model, dataset, task: str, processing_stats: Dict[str, int]) -> Tuple[List[Any], List[Any], Optional[str]]:
+        """Run inference for sklearn models"""
+        try:
+            if hasattr(dataset, 'X') and hasattr(dataset, 'y'):
+                X, y = dataset.X, dataset.y
+            else:
+                # Handle other dataset formats
+                X = np.array([item[0] if isinstance(item, (tuple, list)) else item for item in dataset])
+                y = np.array([item[1] if isinstance(item, (tuple, list)) and len(item) > 1 else None for item in dataset])
+            
+            predictions = self.model_loader.predict_sklearn(model, X, task)
+            references = y.tolist() if y is not None else [None] * len(predictions)
+            
+            processing_stats["processed"] = len(X)
+            processing_stats["successful"] = len(predictions)
+            
+            print(f"   ✅ sklearn inference complete: {len(predictions)} predictions")
+            
+            return predictions.tolist(), references, "sklearn_model"
+            
+        except Exception as e:
+            print(f"   ❌ sklearn inference error: {e}")
+            return [], [], None
+
+    def _run_pytorch_inference(self, model, dataset, task: str, processing_stats: Dict[str, int]) -> Tuple[List[Any], List[Any], Optional[str]]:
+        """Run inference for PyTorch models"""
+        try:
+            predictions = []
+            references = []
+            
+            # Handle different dataset types
+            if hasattr(dataset, '__getitem__'):
+                for i in range(len(dataset)):
+                    try:
+                        sample = dataset[i]
+                        if isinstance(sample, (tuple, list)) and len(sample) >= 1:
+                            X = sample[0]
+                            y = sample[1] if len(sample) > 1 else None
+                        else:
+                            X = sample
+                            y = None
+                        
+                        pred = self.model_loader.predict_pytorch(model, X.unsqueeze(0) if X.dim() > 0 else X, task)
+                        predictions.append(pred[0] if len(pred) > 0 else pred)
+                        references.append(y.item() if isinstance(y, torch.Tensor) and y.numel() == 1 else y)
+                        
+                        processing_stats["successful"] += 1
+                        
+                    except Exception as e:
+                        processing_stats["errors"] += 1
+                        continue
+                    
+                    processing_stats["processed"] += 1
+            
+            print(f"   ✅ PyTorch inference complete: {len(predictions)} predictions")
+            
+            return predictions, references, "pytorch_model"
+            
+        except Exception as e:
+            print(f"   ❌ PyTorch inference error: {e}")
+            return [], [], None
+
+    def _run_huggingface_inference(self, model: Any, processor: Any, dataset: Any, task: str,
+                                  label_key: str, model_name: str, processing_stats: Dict[str, int]) -> Tuple[List[Any], List[Any], Optional[str]]:
+        """Run inference for HuggingFace models"""
+        predictions = []
+        references = []
+        
+        # Determine model type for specialized handling
+        model_type = self._determine_model_type(model_name, task, "huggingface")
 
         # Process samples with progress tracking
         start_time = time.time()
@@ -311,7 +391,7 @@ class EcoLyzer:
 
                 # Process single sample using dataset loader
                 pred, ref = self.dataset_loader.process_single_sample(
-                    sample, model, processor, task, label_key, model_name, self._current_dataset_name
+                    sample, model, processor, task, label_key, model_name, self._current_dataset_name, "huggingface"
                 )
 
                 if pred is not None and ref is not None:
@@ -343,7 +423,7 @@ class EcoLyzer:
 
         # Final processing summary
         total_time = time.time() - start_time
-        success_rate = processing_stats["successful"] / processing_stats["processed"] * 100
+        success_rate = processing_stats["successful"] / processing_stats["processed"] * 100 if processing_stats["processed"] > 0 else 0
 
         print(f"   ✅ Inference complete:")
         print(f"      Successful: {processing_stats['successful']}/{processing_stats['processed']} ({success_rate:.1f}%)")
@@ -354,32 +434,37 @@ class EcoLyzer:
 
         return predictions, references, model_type
 
-    def _determine_model_type(self, model_name: str, task_type: str) -> Optional[str]:
+    def _determine_model_type(self, model_name: str, task_type: str, framework: str) -> Optional[str]:
         """Determine specific model type for specialized handling"""
-        model_name_lower = model_name.lower()
+        if framework == "sklearn":
+            return f"sklearn_{model_name}"
+        elif framework == "pytorch":
+            return f"pytorch_{model_name}"
+        else:  # huggingface
+            model_name_lower = model_name.lower()
 
-        if task_type == "audio":
-            if "wav2vec2" in model_name_lower or "whisper" in model_name_lower:
-                return "asr"  # Automatic Speech Recognition
-            else:
-                return "classification"
-        elif task_type == "text":
-            if any(arch in model_name_lower for arch in ["gpt", "llama", "mistral", "phi"]):
-                return "causal_lm"  # Causal Language Model
-            elif any(arch in model_name_lower for arch in ["bert", "roberta", "distilbert"]):
-                return "masked_lm"  # Masked Language Model
-        elif task_type == "image":
-            if any(arch in model_name_lower for arch in ["vit", "deit", "swin"]):
-                return "vision_transformer"
-            elif any(arch in model_name_lower for arch in ["resnet", "efficientnet", "mobilenet"]):
-                return "cnn"
+            if task_type == "audio":
+                if "wav2vec2" in model_name_lower or "whisper" in model_name_lower:
+                    return "asr"  # Automatic Speech Recognition
+                else:
+                    return "classification"
+            elif task_type == "text":
+                if any(arch in model_name_lower for arch in ["gpt", "llama", "mistral", "phi"]):
+                    return "causal_lm"  # Causal Language Model
+                elif any(arch in model_name_lower for arch in ["bert", "roberta", "distilbert"]):
+                    return "masked_lm"  # Masked Language Model
+            elif task_type == "image":
+                if any(arch in model_name_lower for arch in ["vit", "deit", "swin"]):
+                    return "vision_transformer"
+                elif any(arch in model_name_lower for arch in ["resnet", "efficientnet", "mobilenet"]):
+                    return "cnn"
 
         return None
 
     def compute_metrics(self, predictions: List[Any], references: List[Any],
-                       task: str, model_type: Optional[str] = None) -> Dict[str, Any]:
-        """Compute appropriate metrics based on task type"""
-        return self.accuracy_metrics.compute_metrics(predictions, references, task, model_type)
+                       task: str, model_type: Optional[str] = None, framework: str = "huggingface") -> Dict[str, Any]:
+        """Compute appropriate metrics based on task type and framework"""
+        return self.accuracy_metrics.compute_metrics(predictions, references, task, model_type, framework)
 
     def run(self) -> Dict[str, Any]:
         """
@@ -414,8 +499,15 @@ class EcoLyzer:
         if not self.config.get("models") or not self.config.get("datasets"):
             raise ValueError("Configuration must include 'models' and 'datasets' lists")
 
-        total_combinations = len(self.config["models"]) * len(self.config["datasets"])
-        print(f"📊 Evaluating {total_combinations} model-dataset combinations")
+        # Count compatible combinations
+        compatible_combinations = 0
+        for model_cfg in self.config["models"]:
+            for dataset_cfg in self.config["datasets"]:
+                if (model_cfg.get("task") == dataset_cfg.get("task") and 
+                    model_cfg.get("framework", "huggingface") == dataset_cfg.get("framework", "huggingface")):
+                    compatible_combinations += 1
+
+        print(f"📊 Evaluating {compatible_combinations} compatible model-dataset combinations")
         print(f"🖥️ Hardware: {self.capabilities.device_category}")
         print(f"⚡ Monitoring: {', '.join(self.capabilities.monitoring_methods)}")
         print(f"{'='*80}")
@@ -426,28 +518,35 @@ class EcoLyzer:
         for model_cfg in self.config["models"]:
             model_name = model_cfg["name"]
             task_type = model_cfg["task"]
+            framework = model_cfg.get("framework", "huggingface")
             specified_model_type = model_cfg.get("model_type")
+            model_params = model_cfg.get("model_params", {})
 
             for dataset_cfg in self.config["datasets"]:
+                # Extract dataset configuration
+                dataset_name = dataset_cfg["name"]
+                dataset_framework = dataset_cfg.get("framework", "huggingface")
+                dataset_task = dataset_cfg["task"]
+                
+                # Skip if framework or task mismatch
+                if framework != dataset_framework or task_type != dataset_task:
+                    print(f"⏭️ Skipping {model_name} on {dataset_name} (framework/task mismatch)")
+                    continue
+
                 combination_count += 1
 
                 # Extract dataset configuration
-                dataset_name = dataset_cfg["name"]
                 subset = dataset_cfg.get("subset")
                 split = dataset_cfg.get("split", "test")
                 fallback_splits = dataset_cfg.get("fallback_splits", ["train", "validation"])
                 strict_split = dataset_cfg.get("strict_split", False)
                 label_key = dataset_cfg.get("label_key", "text")
                 limit = dataset_cfg.get("limit")
-                task = dataset_cfg["task"]
+                data_params = dataset_cfg.get("data_params", {})
 
-                # Skip if task mismatch
-                if task != task_type:
-                    print(f"⏭️ Skipping {model_name} on {dataset_name} (task mismatch: {task_type} vs {task})")
-                    continue
-
-                print(f"\n📈 Evaluation {combination_count}/{total_combinations}")
+                print(f"\n📈 Evaluation {combination_count}/{compatible_combinations}")
                 print(f"{'='*60}")
+                print(f"Framework: {framework}")
                 print(f"Model: {model_name}")
                 print(f"Dataset: {dataset_name}")
                 print(f"Task: {task_type}")
@@ -464,16 +563,20 @@ class EcoLyzer:
                     self.primary_tracker.start()
 
                     # Load model
-                    model, processor = self.load_model(model_name, task_type, specified_model_type)
+                    model, processor = self.load_model(
+                        model_name, task_type, framework, specified_model_type, **model_params
+                    )
 
                     # Load dataset
                     dataset = self.load_dataset(
                         dataset_name=dataset_name,
+                        framework=framework,
                         subset=subset,
                         split=split,
                         limit=limit,
                         fallback_splits=fallback_splits,
-                        strict_split=strict_split
+                        strict_split=strict_split,
+                        **data_params
                     )
 
                     loading_emissions = self.primary_tracker.stop()
@@ -486,7 +589,8 @@ class EcoLyzer:
                             "dataset_split_used": self._current_dataset_split,
                             "dataset_size": self._current_dataset_size,
                             "model_name": model_name,
-                            "dataset_name": dataset_name
+                            "dataset_name": dataset_name,
+                            "framework": framework
                         })
 
                     # Phase 2: Comprehensive environmental monitoring during inference
@@ -495,7 +599,7 @@ class EcoLyzer:
 
                     # Run inference with monitoring
                     predictions, references, model_type = self.run_inference(
-                        model, processor, dataset, task, label_key, model_name
+                        model, processor, dataset, task_type, label_key, model_name, framework
                     )
 
                     inference_emissions = self.primary_tracker.stop()
@@ -519,7 +623,7 @@ class EcoLyzer:
                     print("🎯 Phase 4: Computing accuracy metrics...")
                     self.primary_tracker.start()
 
-                    accuracy_metrics = self.compute_metrics(predictions, references, task, model_type)
+                    accuracy_metrics = self.compute_metrics(predictions, references, task_type, model_type, framework)
 
                     metrics_emissions = self.primary_tracker.stop()
                     print(f"✅ Metrics computed - Emissions: {metrics_emissions:.6f} kg CO2")
@@ -535,7 +639,7 @@ class EcoLyzer:
                     pue_adjusted_emissions = total_emissions * pue_factor
 
                     # Generate unique result key
-                    result_key = f"{model_name}__{dataset_name}"
+                    result_key = f"{framework}__{model_name}__{dataset_name}"
                     if subset:
                         result_key += f"__{subset}"
                     result_key += f"__{self._current_dataset_split}"
@@ -543,10 +647,11 @@ class EcoLyzer:
                     # Comprehensive result compilation
                     comprehensive_result = {
                         # Basic identification
+                        "framework": framework,
                         "model_name": model_name,
                         "dataset_name": dataset_name,
                         "subset": subset,
-                        "task": task,
+                        "task": task_type,
                         "model_type": model_type,
 
                         # Dataset information
@@ -620,6 +725,7 @@ class EcoLyzer:
                     if self.wandb_enabled:
                         wandb.log({
                             "combination_complete": combination_count,
+                            "framework": framework,
                             "total_emissions": total_emissions,
                             "pue_adjusted_emissions": pue_adjusted_emissions,
                             "accuracy_score": accuracy_metrics.get("accuracy", accuracy_metrics.get("bleu_score", 0)),
@@ -634,18 +740,20 @@ class EcoLyzer:
 
                     # Print summary for this combination
                     print(f"✅ Evaluation {combination_count} Complete:")
+                    print(f"   Framework: {framework}")
                     print(f"   Total CO2: {total_emissions:.6f} kg (PUE-adjusted: {pue_adjusted_emissions:.6f} kg)")
                     print(f"   Accuracy: {accuracy_metrics.get('accuracy', accuracy_metrics.get('bleu_score', 'N/A'))}")
                     print(f"   Environmental Score: {environmental_metrics.get('integrated_assessment', {}).get('overall_efficiency_score', 'N/A')}")
                     print(f"   Samples Processed: {len(predictions)}/{self._current_dataset_size}")
 
                 except Exception as e:
-                    print(f"❌ Error evaluating {model_name} on {dataset_name}: {e}")
+                    print(f"❌ Error evaluating {framework} {model_name} on {dataset_name}: {e}")
 
                     # Log error to results for debugging
-                    error_key = f"ERROR__{model_name}__{dataset_name}"
+                    error_key = f"ERROR__{framework}__{model_name}__{dataset_name}"
                     self.results[error_key] = {
                         "error": str(e),
+                        "framework": framework,
                         "model_name": model_name,
                         "dataset_name": dataset_name,
                         "timestamp": time.time(),
@@ -683,6 +791,19 @@ class EcoLyzer:
         total_emissions = sum(r["emissions_analysis"]["total_kg_co2"] for r in successful_results.values())
         avg_emissions = total_emissions / len(successful_results)
 
+        # Framework analysis
+        framework_stats = {}
+        for result in successful_results.values():
+            framework = result.get("framework", "unknown")
+            if framework not in framework_stats:
+                framework_stats[framework] = {"count": 0, "total_emissions": 0, "efficiency_scores": []}
+            
+            framework_stats[framework]["count"] += 1
+            framework_stats[framework]["total_emissions"] += result["emissions_analysis"]["total_kg_co2"]
+            
+            efficiency = result.get("environmental_assessment", {}).get("integrated_assessment", {}).get("overall_efficiency_score", 0)
+            framework_stats[framework]["efficiency_scores"].append(efficiency)
+
         # Environmental efficiency analysis
         efficiency_scores = [
             r["environmental_assessment"].get("integrated_assessment", {}).get("overall_efficiency_score", 0)
@@ -690,13 +811,24 @@ class EcoLyzer:
         ]
 
         final_report = {
-            "benchmark_summary": {
+            "analysis_summary": {
                 "total_evaluations": len(successful_results),
                 "failed_evaluations": len([k for k in self.results.keys() if k.startswith('ERROR')]),
                 "total_co2_emissions_kg": total_emissions,
                 "average_co2_per_evaluation_kg": avg_emissions,
                 "hardware_category": self.capabilities.device_category,
-                "monitoring_capabilities": self.capabilities.monitoring_methods
+                "monitoring_capabilities": self.capabilities.monitoring_methods,
+                "frameworks_analyzed": list(framework_stats.keys())
+            },
+
+            "framework_analysis": {
+                framework: {
+                    "evaluation_count": stats["count"],
+                    "total_emissions_kg": stats["total_emissions"],
+                    "avg_emissions_kg": stats["total_emissions"] / stats["count"],
+                    "avg_efficiency_score": sum(stats["efficiency_scores"]) / len(stats["efficiency_scores"]) if stats["efficiency_scores"] else 0
+                }
+                for framework, stats in framework_stats.items()
             },
 
             "environmental_analysis": {
@@ -732,8 +864,8 @@ class EcoLyzer:
 
         # Add metadata to results
         results_with_metadata = {
-            "benchmark_metadata": {
-                "framework_version": "ML-EcoLyzer v1.0 - Comprehensive Environmental Impact Framework",
+            "framework_metadata": {
+                "framework_version": "ML-EcoLyzer v1.0 - Multi-Framework Environmental Impact Analysis",
                 "timestamp": time.time(),
                 "hardware_profile": self.capabilities.__dict__,
                 "configuration": self.config,
@@ -769,6 +901,7 @@ class EcoLyzer:
                     continue
 
                 summary_row = {
+                    "framework": result.get("framework", ""),
                     "model_name": result.get("model_name", ""),
                     "dataset_name": result.get("dataset_name", ""),
                     "task": result.get("task", ""),
