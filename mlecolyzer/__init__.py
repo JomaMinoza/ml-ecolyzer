@@ -94,11 +94,6 @@ from .monitoring.hardware import HardwareCapabilities, detect_hardware_capabilit
 from .utils.validation import validate_config
 from .utils.helpers import setup_logging, get_default_config
 
-# Backward compatibility aliases
-GenBenchRunner = EcoLyzer  # For backward compatibility
-run_comprehensive_carbon_research = run_comprehensive_analysis
-BenchmarkConfig = AnalysisConfig
-
 # Public API
 __all__ = [
     # Main classes and functions
@@ -119,19 +114,14 @@ __all__ = [
     "validate_config",
     "setup_logging",
     "get_default_config",
-    
-    # Backward compatibility
-    "GenBenchRunner",
-    "run_comprehensive_carbon_research",
-    "BenchmarkConfig",
-    
+        
     # Version
     "__version__",
 ]
 
 # Package metadata
-__author__ = "ML-EcoLyzer Research Team"
-__email__ = "contact@ml-ecolyzer.org"
+__author__ = "Center for AI Research PH"
+__email__ = "contact@cair.ph"
 __license__ = "MIT"
 __description__ = "Machine Learning Environmental Impact Analysis Framework"
 
