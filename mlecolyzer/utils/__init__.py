@@ -15,6 +15,15 @@ from .helpers import (
     check_disk_space
 )
 
+from .water_utilities import (
+    calculate_water_equivalents,
+    compare_water_footprints,
+    estimate_water_savings_from_quantization,
+    water_intensity_lookup,
+    generate_water_efficiency_report,
+    calculate_regional_water_impact_comparison
+)
+
 __all__ = [
     # Validation functions
     "validate_config",
@@ -23,6 +32,14 @@ __all__ = [
     "validate_models_config",
     "validate_datasets_config",
     "get_config_summary",
+
+    # Water utilities functions
+    "calculate_water_equivalents",
+    "compare_water_footprints",
+    "estimate_water_savings_from_quantization",
+    "water_intensity_lookup",
+    "generate_water_efficiency_report",
+    "calculate_regional_water_impact_comparison",
     
     # Helper functions
     "setup_logging",

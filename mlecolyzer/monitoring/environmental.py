@@ -22,7 +22,10 @@ try:
 except ImportError:
     HAS_PYNVML = False
 
-from .hardware import HardwareCapabilities, get_device_power_profile, estimate_cooling_overhead
+from .hardware import (
+    HardwareCapabilities, get_device_power_profile, get_device_water_profile,
+    estimate_cooling_overhead, calculate_water_footprint_from_energy
+)
 
 
 @dataclass
@@ -32,6 +35,8 @@ class EnvironmentalMetrics:
     power_consumption_watts: float
     cpu_utilization_percent: float
     memory_utilization_percent: float
+    water_consumption_liters_per_hour: float
+    cumulative_water_liters: float
     gpu_utilization_percent: Optional[float] = None
     gpu_memory_utilization_percent: Optional[float] = None
     gpu_temperature_celsius: Optional[float] = None
@@ -64,6 +69,7 @@ class AdaptiveEnvironmentalTracker:
         
         self.capabilities = capabilities
         self.power_profile = get_device_power_profile(capabilities)
+        self.water_profile = get_device_water_profile(capabilities)
         self.cooling_factor = estimate_cooling_overhead(capabilities)
         
         # Initialize monitoring components
@@ -76,6 +82,10 @@ class AdaptiveEnvironmentalTracker:
         self._monitoring_thread = None
         self._metrics_history: List[EnvironmentalMetrics] = []
         self._monitoring_lock = threading.Lock()
+        
+        # Water tracking state
+        self._cumulative_water_liters = 0.0
+        self._last_water_calculation_time = None
 
     def _init_gpu_monitoring(self):
         """Initialize GPU monitoring if available"""
@@ -105,10 +115,10 @@ class AdaptiveEnvironmentalTracker:
 
     def collect_current_metrics(self) -> EnvironmentalMetrics:
         """
-        Collect current environmental metrics
+        Collect current environmental metrics including water footprint
         
         Returns:
-            EnvironmentalMetrics: Current system metrics
+            EnvironmentalMetrics: Current system metrics with water footprint
         """
         timestamp = time.time()
         
@@ -118,6 +128,11 @@ class AdaptiveEnvironmentalTracker:
         
         # Power consumption estimation
         power_consumption = self._estimate_power_consumption(cpu_utilization)
+        
+        # Water consumption calculation
+        water_consumption_per_hour, cumulative_water = self._calculate_water_consumption(
+            power_consumption, timestamp
+        )
         
         # GPU metrics
         gpu_utilization = None
@@ -147,6 +162,8 @@ class AdaptiveEnvironmentalTracker:
             power_consumption_watts=power_consumption,
             cpu_utilization_percent=cpu_utilization,
             memory_utilization_percent=memory_utilization,
+            water_consumption_liters_per_hour=water_consumption_per_hour,
+            cumulative_water_liters=cumulative_water,
             gpu_utilization_percent=gpu_utilization,
             gpu_memory_utilization_percent=gpu_memory_utilization,
             gpu_temperature_celsius=gpu_temperature,
@@ -154,6 +171,38 @@ class AdaptiveEnvironmentalTracker:
             battery_level_percent=battery_level,
             battery_time_remaining_seconds=battery_time_remaining
         )
+
+    def _calculate_water_consumption(self, power_watts: float, timestamp: float) -> tuple[float, float]:
+        """
+        Calculate water consumption based on power usage
+        
+        Args:
+            power_watts: Current power consumption in watts
+            timestamp: Current timestamp
+            
+        Returns:
+            Tuple of (liters_per_hour, cumulative_liters)
+        """
+        # Convert power to energy consumption rate (kW)
+        power_kw = power_watts / 1000.0
+        
+        # Water consumption rate (liters per hour)
+        water_liters_per_hour = power_kw * self.capabilities.water_intensity_factor
+        
+        # Apply device-specific overhead factors
+        cooling_overhead = self.water_profile.get("cooling_overhead", 1.0)
+        infrastructure_overhead = self.water_profile.get("infrastructure_overhead", 1.0)
+        
+        total_water_per_hour = water_liters_per_hour * cooling_overhead * infrastructure_overhead
+        
+        # Update cumulative water consumption
+        if self._last_water_calculation_time is not None:
+            time_delta_hours = (timestamp - self._last_water_calculation_time) / 3600.0
+            self._cumulative_water_liters += total_water_per_hour * time_delta_hours
+        
+        self._last_water_calculation_time = timestamp
+        
+        return total_water_per_hour, self._cumulative_water_liters
 
     def _get_cpu_utilization(self) -> float:
         """Get CPU utilization percentage"""
@@ -290,6 +339,8 @@ class AdaptiveEnvironmentalTracker:
         
         self._monitoring_active = True
         self._metrics_history.clear()
+        self._cumulative_water_liters = 0.0
+        self._last_water_calculation_time = None
         
         def monitoring_loop():
             interval = 1.0 / frequency_hz
@@ -337,9 +388,10 @@ class AdaptiveEnvironmentalTracker:
             include_quantization_analysis: Whether to include quantization analysis
             
         Returns:
-            Dict with comprehensive environmental analysis
+            Dict with comprehensive environmental analysis including water footprint
         """
         print(f"🔍 Starting {duration_seconds}s environmental monitoring at {frequency_hz} Hz...")
+        print(f"💧 Water intensity factor: {self.capabilities.water_intensity_factor:.2f} L/kWh ({self.capabilities.region})")
         
         # Start monitoring
         self.start_monitoring(frequency_hz)
@@ -370,7 +422,9 @@ class AdaptiveEnvironmentalTracker:
             "frequency_hz": frequency_hz,
             "samples_collected": len(metrics_history),
             "monitoring_capabilities": self.capabilities.monitoring_methods,
-            "device_category": self.capabilities.device_category
+            "device_category": self.capabilities.device_category,
+            "water_intensity_factor": self.capabilities.water_intensity_factor,
+            "region": self.capabilities.region
         }
         
         # Add quantization analysis if requested
@@ -386,13 +440,15 @@ class AdaptiveEnvironmentalTracker:
         return analysis
 
     def _analyze_metrics_history(self, metrics_history: List[EnvironmentalMetrics]) -> Dict[str, Any]:
-        """Analyze collected metrics history"""
+        """Analyze collected metrics history including water footprint"""
         if not metrics_history:
             return {"error": "No metrics to analyze"}
         
         # Extract time series data
         timestamps = [m.timestamp for m in metrics_history]
         power_consumption = [m.power_consumption_watts for m in metrics_history]
+        water_consumption = [m.water_consumption_liters_per_hour for m in metrics_history]
+        cumulative_water = [m.cumulative_water_liters for m in metrics_history]
         cpu_utilization = [m.cpu_utilization_percent for m in metrics_history]
         memory_utilization = [m.memory_utilization_percent for m in metrics_history]
         
@@ -414,6 +470,18 @@ class AdaptiveEnvironmentalTracker:
                 "min_watts": min(power_consumption),
                 "total_energy_wh": self._calculate_energy_consumption(timestamps, power_consumption),
                 "power_efficiency": self._calculate_power_efficiency(cpu_utilization, power_consumption)
+            },
+            
+            "water_analysis": {
+                "average_liters_per_hour": sum(water_consumption) / len(water_consumption),
+                "max_liters_per_hour": max(water_consumption),
+                "min_liters_per_hour": min(water_consumption),
+                "total_water_liters": cumulative_water[-1] if cumulative_water else 0,
+                "water_intensity_factor": self.capabilities.water_intensity_factor,
+                "region": self.capabilities.region,
+                "water_efficiency": self._calculate_water_efficiency(cpu_utilization, water_consumption),
+                "water_footprint_breakdown": self._calculate_water_footprint_breakdown(),
+                "water_equivalent_bottles": self._calculate_water_equivalent_bottles(cumulative_water[-1] if cumulative_water else 0)
             },
             
             "resource_analysis": {
@@ -450,10 +518,95 @@ class AdaptiveEnvironmentalTracker:
             analysis["battery_analysis"] = {
                 "avg_battery_level": sum(battery_level) / len(battery_level),
                 "battery_drain_rate": self._calculate_battery_drain_rate(timestamps, battery_level),
-                "estimated_runtime_hours": self._estimate_battery_runtime(battery_level, timestamps)
+                "estimated_runtime_hours": self._estimate_battery_runtime(battery_level, timestamps),
+                "water_per_battery_percent": self._calculate_water_per_battery_percent(water_consumption, battery_level)
             }
         
         return analysis
+
+    def _calculate_water_efficiency(self, cpu_utilization: List[float], water_consumption: List[float]) -> float:
+        """Calculate water efficiency score (0-1)"""
+        if not cpu_utilization or not water_consumption:
+            return 0.5
+        
+        avg_utilization = sum(cpu_utilization) / len(cpu_utilization)
+        avg_water = sum(water_consumption) / len(water_consumption)
+        
+        # Efficiency is high when utilization is high but water consumption is relatively low
+        max_expected_water = self.water_profile.get("max_liters_per_hour", avg_water * 2)
+        
+        if max_expected_water > 0:
+            water_ratio = avg_water / max_expected_water
+            utilization_ratio = avg_utilization / 100.0
+            
+            if utilization_ratio > 0:
+                efficiency = utilization_ratio / water_ratio
+                return min(1.0, efficiency)
+        
+        return 0.5
+
+    def _calculate_water_footprint_breakdown(self) -> Dict[str, float]:
+        """Calculate detailed water footprint breakdown"""
+        total_water = self._cumulative_water_liters
+        
+        # Calculate breakdown based on device profile
+        cooling_overhead = self.water_profile.get("cooling_overhead", 1.0)
+        infrastructure_overhead = self.water_profile.get("infrastructure_overhead", 1.0)
+        
+        # Base water consumption (direct energy-to-water conversion)
+        base_water = total_water / (cooling_overhead * infrastructure_overhead)
+        
+        # Breakdown components
+        cooling_water = base_water * (cooling_overhead - 1.0)
+        infrastructure_water = base_water * cooling_overhead * (infrastructure_overhead - 1.0)
+        
+        return {
+            "direct_energy_water_liters": base_water,
+            "cooling_water_liters": cooling_water,
+            "infrastructure_water_liters": infrastructure_water,
+            "total_water_liters": total_water,
+            "cooling_percentage": (cooling_water / total_water * 100) if total_water > 0 else 0,
+            "infrastructure_percentage": (infrastructure_water / total_water * 100) if total_water > 0 else 0
+        }
+
+    def _calculate_water_equivalent_bottles(self, water_liters: float) -> Dict[str, float]:
+        """Calculate water consumption in terms of everyday equivalents"""
+        # Standard bottle size: 0.5 liters
+        bottles_500ml = water_liters / 0.5
+        
+        # Standard glass: 0.25 liters
+        glasses = water_liters / 0.25
+        
+        # Standard gallon: 3.785 liters
+        gallons = water_liters / 3.785
+        
+        # Coffee cup: 0.24 liters
+        coffee_cups = water_liters / 0.24
+        
+        return {
+            "bottles_500ml": bottles_500ml,
+            "glasses_250ml": glasses,
+            "gallons": gallons,
+            "coffee_cups": coffee_cups
+        }
+
+    def _calculate_water_per_battery_percent(self, water_consumption: List[float], battery_levels: List[float]) -> Optional[float]:
+        """Calculate water consumption per battery percentage for mobile devices"""
+        if not water_consumption or not battery_levels or len(battery_levels) < 2:
+            return None
+        
+        avg_water_per_hour = sum(water_consumption) / len(water_consumption)
+        
+        # Calculate battery drain rate
+        battery_start = battery_levels[0]
+        battery_end = battery_levels[-1]
+        battery_drop = battery_start - battery_end
+        
+        if battery_drop > 0:
+            # Water consumption per 1% battery drop
+            return avg_water_per_hour / battery_drop
+        
+        return None
 
     def _calculate_energy_consumption(self, timestamps: List[float], power_watts: List[float]) -> float:
         """Calculate total energy consumption in Wh"""
@@ -568,25 +721,33 @@ class AdaptiveEnvironmentalTracker:
         return None
 
     def _analyze_quantization_potential(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze potential benefits of model quantization"""
-        # This is a simplified analysis - in practice would be more sophisticated
+        """Analyze potential benefits of model quantization including water savings"""
         power_analysis = analysis.get("power_analysis", {})
-        avg_power = power_analysis.get("average_watts", 0)
+        water_analysis = analysis.get("water_analysis", {})
         
-        # Estimate quantization benefits based on device category and current power usage
+        avg_power = power_analysis.get("average_watts", 0)
+        total_water = water_analysis.get("total_water_liters", 0)
+        
+        # Estimate quantization benefits based on device category and current usage
         if self.capabilities.device_category in ["mobile", "edge"]:
-            potential_savings = 0.3  # 30% power savings
+            potential_power_savings = 0.3  # 30% power savings
+            potential_water_savings = 0.35  # 35% water savings (higher due to cooling reduction)
             recommended = True
         elif self.capabilities.device_category in ["desktop_gpu", "desktop_cpu"]:
-            potential_savings = 0.2  # 20% power savings
+            potential_power_savings = 0.2  # 20% power savings
+            potential_water_savings = 0.25  # 25% water savings
             recommended = avg_power > 200  # Recommend if power usage is high
         else:  # datacenter
-            potential_savings = 0.15  # 15% power savings
+            potential_power_savings = 0.15  # 15% power savings
+            potential_water_savings = 0.20  # 20% water savings (cooling benefits)
             recommended = avg_power > 400
         
         return {
-            "potential_power_savings_percent": potential_savings * 100,
-            "estimated_energy_reduction_wh": power_analysis.get("total_energy_wh", 0) * potential_savings,
+            "potential_power_savings_percent": potential_power_savings * 100,
+            "potential_water_savings_percent": potential_water_savings * 100,
+            "estimated_energy_reduction_wh": power_analysis.get("total_energy_wh", 0) * potential_power_savings,
+            "estimated_water_reduction_liters": total_water * potential_water_savings,
+            "water_bottles_saved": (total_water * potential_water_savings) / 0.5,  # 500ml bottles
             "recommended": recommended,
             "quantization_methods": self._recommend_quantization_methods()
         }
@@ -606,7 +767,7 @@ class AdaptiveEnvironmentalTracker:
         return methods
 
     def _generate_recommendations(self, analysis: Dict[str, Any]) -> List[str]:
-        """Generate optimization recommendations based on analysis"""
+        """Generate optimization recommendations based on analysis including water efficiency"""
         recommendations = []
         
         # Power recommendations
@@ -614,11 +775,27 @@ class AdaptiveEnvironmentalTracker:
         avg_power = power_analysis.get("average_watts", 0)
         power_efficiency = power_analysis.get("power_efficiency", 0.5)
         
+        # Water recommendations
+        water_analysis = analysis.get("water_analysis", {})
+        total_water = water_analysis.get("total_water_liters", 0)
+        water_efficiency = water_analysis.get("water_efficiency", 0.5)
+        
         if power_efficiency < 0.3:
             recommendations.append("Consider model optimization or hardware upgrade for better power efficiency")
         
+        if water_efficiency < 0.3:
+            recommendations.append("High water consumption detected - consider model quantization or workload optimization")
+        
         if avg_power > self.power_profile["max_power"] * 0.8:
             recommendations.append("High power consumption detected - consider workload distribution or cooling optimization")
+        
+        # Water-specific recommendations
+        if total_water > 1.0:  # More than 1 liter used
+            water_bottles = total_water / 0.5
+            recommendations.append(f"Water footprint equivalent to {water_bottles:.1f} bottles - consider green computing practices")
+        
+        if self.capabilities.device_category == "datacenter" and total_water > 5.0:
+            recommendations.append("High data center water usage - investigate cooling efficiency and renewable energy sources")
         
         # Resource recommendations
         resource_analysis = analysis.get("resource_analysis", {})
@@ -665,12 +842,13 @@ class AdaptiveEnvironmentalTracker:
         return recommendations
 
     def _generate_integrated_assessment(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate overall integrated environmental assessment"""
+        """Generate overall integrated environmental assessment including water efficiency"""
         # Calculate component scores
         power_score = analysis.get("power_analysis", {}).get("power_efficiency", 0.5)
+        water_score = analysis.get("water_analysis", {}).get("water_efficiency", 0.5)
         resource_score = analysis.get("resource_analysis", {}).get("resource_efficiency", 0.5)
         
-        scores = [power_score, resource_score]
+        scores = [power_score, water_score, resource_score]
         
         # Add GPU score if available
         gpu_analysis = analysis.get("gpu_analysis", {})
@@ -695,11 +873,26 @@ class AdaptiveEnvironmentalTracker:
         else:
             efficiency_category = "poor"
         
+        # Water impact classification
+        total_water = analysis.get("water_analysis", {}).get("total_water_liters", 0)
+        if total_water < 0.1:
+            water_impact = "minimal"
+        elif total_water < 0.5:
+            water_impact = "low"
+        elif total_water < 2.0:
+            water_impact = "moderate"
+        elif total_water < 10.0:
+            water_impact = "high"
+        else:
+            water_impact = "very_high"
+        
         return {
             "overall_efficiency_score": overall_efficiency,
             "efficiency_category": efficiency_category,
+            "water_impact_category": water_impact,
             "component_scores": {
                 "power_efficiency": power_score,
+                "water_efficiency": water_score,
                 "resource_efficiency": resource_score,
                 "gpu_efficiency": gpu_analysis.get("gpu_efficiency") if gpu_analysis else None,
                 "thermal_efficiency": thermal_analysis.get("thermal_efficiency") if thermal_analysis else None
@@ -721,11 +914,14 @@ class AdaptiveEnvironmentalTracker:
         if "battery_analysis" in analysis and self.capabilities.has_battery:
             quality_factors.append("battery_monitoring")
         
+        if "water_analysis" in analysis:
+            quality_factors.append("water_footprint_tracking")
+        
         if HAS_PSUTIL:
             quality_factors.append("system_monitoring")
         
         # Determine overall quality
-        quality_score = len(quality_factors) / len(self.capabilities.monitoring_methods)
+        quality_score = len(quality_factors) / max(len(self.capabilities.monitoring_methods), 1)
         
         if quality_score >= 0.8:
             overall_quality = "high"
@@ -738,5 +934,7 @@ class AdaptiveEnvironmentalTracker:
             "overall_quality": overall_quality,
             "quality_score": quality_score,
             "available_monitoring": quality_factors,
-            "missing_monitoring": [m for m in self.capabilities.monitoring_methods if m not in quality_factors]
+            "missing_monitoring": [m for m in self.capabilities.monitoring_methods if m not in quality_factors],
+            "water_tracking_available": True,
+            "water_intensity_region": self.capabilities.region
         }

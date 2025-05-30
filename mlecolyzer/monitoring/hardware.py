@@ -47,6 +47,8 @@ class HardwareCapabilities:
         memory_info: Memory information
         thermal_sensors: Available thermal sensors
         power_sensors: Available power monitoring
+        water_intensity_factor: Water consumption per kWh (liters/kWh)
+        region: Estimated region for water/carbon intensity
     """
     platform: str
     device_category: str
@@ -60,6 +62,8 @@ class HardwareCapabilities:
     memory_info: Dict[str, Any]
     thermal_sensors: List[str]
     power_sensors: List[str]
+    water_intensity_factor: float
+    region: str
 
 
 def detect_hardware_capabilities() -> HardwareCapabilities:
@@ -90,6 +94,9 @@ def detect_hardware_capabilities() -> HardwareCapabilities:
     # Power sensors
     power_sensors = _detect_power_sensors()
     
+    # Water intensity and region detection
+    water_intensity_factor, region = _detect_water_intensity_factor()
+    
     # Available monitoring methods
     monitoring_methods = _detect_monitoring_methods(
         has_gpu, has_gpu_monitoring, has_battery, thermal_sensors, power_sensors
@@ -112,8 +119,246 @@ def detect_hardware_capabilities() -> HardwareCapabilities:
         cpu_info=cpu_info,
         memory_info=memory_info,
         thermal_sensors=thermal_sensors,
-        power_sensors=power_sensors
+        power_sensors=power_sensors,
+        water_intensity_factor=water_intensity_factor,
+        region=region
     )
+
+
+def _detect_water_intensity_factor() -> tuple[float, str]:
+    """
+    Detect water intensity factor based on region and energy mix
+    
+    Returns:
+        Tuple of (water_intensity_liters_per_kwh, region_name)
+    """
+    # Default global average water intensity
+    default_water_intensity = 2.5  # liters per kWh (global average)
+    default_region = "global_average"
+    
+    try:
+        # Attempt to detect region based on various indicators
+        region = _detect_region()
+        
+        # Water intensity factors by region (liters per kWh)
+        # Based on energy mix and cooling requirements
+        water_intensity_map = {
+            # High water intensity (coal/nuclear heavy, dry climates)
+            "us_southwest": 4.2,      # Arizona, Nevada, California
+            "us_texas": 3.8,          # Texas (coal + natural gas)
+            "china_north": 4.5,       # Northern China (coal heavy)
+            "india": 3.9,             # India (coal + hot climate)
+            "australia": 4.1,         # Australia (coal + dry climate)
+            "middle_east": 4.8,       # Middle East (oil + very hot/dry)
+            
+            # Medium water intensity
+            "us_east": 3.2,           # US East Coast
+            "us_central": 3.0,        # US Central states
+            "germany": 2.8,           # Germany (mixed energy)
+            "uk": 2.5,                # UK (natural gas + renewables)
+            "japan": 3.1,             # Japan (mixed, some nuclear)
+            "south_korea": 3.3,       # South Korea
+            "france": 2.2,            # France (nuclear heavy, low water)
+            "canada": 2.1,            # Canada (hydro heavy)
+            "brazil": 2.0,            # Brazil (hydro heavy)
+            
+            # Low water intensity (renewables heavy, cooler climates)
+            "scandinavia": 1.5,       # Norway, Sweden, Denmark (hydro/wind)
+            "iceland": 1.2,           # Iceland (geothermal/hydro + cold)
+            "switzerland": 1.8,       # Switzerland (hydro + nuclear)
+            "new_zealand": 1.6,       # New Zealand (hydro/geothermal)
+            "costa_rica": 1.4,        # Costa Rica (renewables heavy)
+            
+            # Cloud provider regions (optimized data centers)
+            "aws_us_west": 3.5,       # AWS US West
+            "aws_us_east": 3.0,       # AWS US East  
+            "aws_eu_west": 2.3,       # AWS EU West
+            "azure_europe": 2.4,      # Azure Europe
+            "gcp_us": 3.2,            # Google Cloud US
+            "gcp_europe": 2.2,        # Google Cloud Europe
+        }
+        
+        return water_intensity_map.get(region, default_water_intensity), region
+        
+    except Exception:
+        return default_water_intensity, default_region
+
+
+def _detect_region() -> str:
+    """
+    Detect geographic region for environmental factors
+    
+    Returns:
+        Region identifier string
+    """
+    try:
+        # Method 1: Check environment variables (useful for cloud deployments)
+        cloud_region = _detect_cloud_region()
+        if cloud_region:
+            return cloud_region
+        
+        # Method 2: Platform-specific detection
+        platform_name = platform.system().lower()
+        
+        if platform_name == "darwin":  # macOS
+            return _detect_macos_region()
+        elif platform_name == "linux":
+            return _detect_linux_region()
+        elif platform_name == "windows":
+            return _detect_windows_region()
+        
+        # Method 3: Timezone-based fallback
+        return _detect_region_from_timezone()
+        
+    except Exception:
+        return "global_average"
+
+
+def _detect_cloud_region() -> Optional[str]:
+    """Detect cloud provider region from environment variables"""
+    # AWS region detection
+    aws_region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+    if aws_region:
+        if aws_region.startswith("us-west"):
+            return "aws_us_west"
+        elif aws_region.startswith("us-east"):
+            return "aws_us_east"
+        elif aws_region.startswith("eu-"):
+            return "aws_eu_west"
+    
+    # Azure region detection
+    azure_region = os.environ.get("AZURE_REGION")
+    if azure_region and "europe" in azure_region.lower():
+        return "azure_europe"
+    
+    # Google Cloud region detection
+    gcp_zone = os.environ.get("GOOGLE_CLOUD_ZONE") or os.environ.get("GCP_ZONE")
+    if gcp_zone:
+        if gcp_zone.startswith("us-"):
+            return "gcp_us"
+        elif gcp_zone.startswith("europe-"):
+            return "gcp_europe"
+    
+    return None
+
+
+def _detect_macos_region() -> str:
+    """Detect region on macOS"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["defaults", "read", "-g", "AppleLocale"],
+            capture_output=True, text=True, timeout=5
+        )
+        
+        if result.returncode == 0:
+            locale = result.stdout.strip()
+            if locale.startswith("en_US"):
+                return "us_east"  # Default US region
+            elif locale.startswith("en_CA"):
+                return "canada"
+            elif locale.startswith("en_GB"):
+                return "uk"
+            elif locale.startswith("de_"):
+                return "germany"
+            elif locale.startswith("fr_"):
+                return "france"
+    except:
+        pass
+    
+    return "us_east"  # macOS default
+
+
+def _detect_linux_region() -> str:
+    """Detect region on Linux"""
+    try:
+        # Check locale
+        locale = os.environ.get("LANG", "")
+        
+        if "en_US" in locale:
+            return "us_east"
+        elif "en_CA" in locale:
+            return "canada"
+        elif "en_GB" in locale:
+            return "uk"
+        elif "de_" in locale:
+            return "germany"
+        elif "fr_" in locale:
+            return "france"
+        elif "ja_" in locale:
+            return "japan"
+        elif "ko_" in locale:
+            return "south_korea"
+        elif "zh_CN" in locale:
+            return "china_north"
+        elif "pt_BR" in locale:
+            return "brazil"
+        
+        # Check timezone
+        return _detect_region_from_timezone()
+        
+    except:
+        pass
+    
+    return "global_average"
+
+
+def _detect_windows_region() -> str:
+    """Detect region on Windows"""
+    try:
+        # Try to use Windows locale information
+        import locale
+        system_locale = locale.getdefaultlocale()
+        
+        if system_locale and system_locale[0]:
+            lang_code = system_locale[0]
+            
+            if lang_code.startswith("en_US"):
+                return "us_east"
+            elif lang_code.startswith("en_CA"):
+                return "canada"
+            elif lang_code.startswith("en_GB"):
+                return "uk"
+            elif lang_code.startswith("de"):
+                return "germany"
+            elif lang_code.startswith("fr"):
+                return "france"
+            elif lang_code.startswith("ja"):
+                return "japan"
+            elif lang_code.startswith("ko"):
+                return "south_korea"
+            elif lang_code.startswith("zh_CN"):
+                return "china_north"
+    except:
+        pass
+    
+    return "us_east"  # Windows default
+
+
+def _detect_region_from_timezone() -> str:
+    """Detect region from timezone information"""
+    try:
+        import time
+        
+        # Get timezone offset
+        timezone_offset = time.timezone
+        
+        # Rough mapping of timezone offsets to regions
+        if -8 <= timezone_offset // 3600 <= -5:  # US timezones
+            return "us_east"
+        elif timezone_offset // 3600 == 0:  # GMT
+            return "uk"
+        elif 1 <= timezone_offset // 3600 <= 2:  # Central Europe
+            return "germany"
+        elif timezone_offset // 3600 == 9:  # Japan
+            return "japan"
+        elif timezone_offset // 3600 == 8:  # China
+            return "china_north"
+        
+    except:
+        pass
+    
+    return "global_average"
 
 
 def _detect_gpu_capabilities() -> tuple[bool, int, List[str], bool]:
@@ -398,6 +643,71 @@ def get_device_power_profile(capabilities: HardwareCapabilities) -> Dict[str, fl
     return profiles.get(capabilities.device_category, profiles["desktop_cpu"])
 
 
+def get_device_water_profile(capabilities: HardwareCapabilities) -> Dict[str, float]:
+    """
+    Get water consumption profile for device category
+    
+    Returns estimated water consumption in liters for different operations
+    """
+    # Base water intensity from regional factors
+    base_intensity = capabilities.water_intensity_factor
+    
+    # Device-specific water consumption profiles (liters per hour of operation)
+    # Accounts for cooling, data center infrastructure, etc.
+    profiles = {
+        "datacenter": {
+            "idle_liters_per_hour": base_intensity * 0.25,  # 250W baseline
+            "cpu_load_liters_per_hour": base_intensity * 0.4,  # 400W
+            "gpu_load_liters_per_hour": base_intensity * 0.6,  # 600W
+            "max_liters_per_hour": base_intensity * 0.8,  # 800W
+            "cooling_overhead": 1.4,  # Data center cooling overhead
+            "infrastructure_overhead": 1.2  # Additional infrastructure water usage
+        },
+        "desktop_gpu": {
+            "idle_liters_per_hour": base_intensity * 0.08,  # 80W
+            "cpu_load_liters_per_hour": base_intensity * 0.15,  # 150W
+            "gpu_load_liters_per_hour": base_intensity * 0.3,  # 300W
+            "max_liters_per_hour": base_intensity * 0.4,  # 400W
+            "cooling_overhead": 1.1,  # Minimal cooling overhead
+            "infrastructure_overhead": 1.0  # No additional infrastructure
+        },
+        "desktop_cpu": {
+            "idle_liters_per_hour": base_intensity * 0.05,  # 50W
+            "cpu_load_liters_per_hour": base_intensity * 0.12,  # 120W
+            "gpu_load_liters_per_hour": base_intensity * 0.12,  # Same as CPU
+            "max_liters_per_hour": base_intensity * 0.15,  # 150W
+            "cooling_overhead": 1.05,  # Minimal cooling
+            "infrastructure_overhead": 1.0
+        },
+        "server_cpu": {
+            "idle_liters_per_hour": base_intensity * 0.15,  # 150W
+            "cpu_load_liters_per_hour": base_intensity * 0.25,  # 250W
+            "gpu_load_liters_per_hour": base_intensity * 0.25,
+            "max_liters_per_hour": base_intensity * 0.35,  # 350W
+            "cooling_overhead": 1.3,  # Server cooling
+            "infrastructure_overhead": 1.1
+        },
+        "edge": {
+            "idle_liters_per_hour": base_intensity * 0.015,  # 15W
+            "cpu_load_liters_per_hour": base_intensity * 0.025,  # 25W
+            "gpu_load_liters_per_hour": base_intensity * 0.035,  # 35W
+            "max_liters_per_hour": base_intensity * 0.045,  # 45W
+            "cooling_overhead": 1.0,  # Passive cooling
+            "infrastructure_overhead": 1.0
+        },
+        "mobile": {
+            "idle_liters_per_hour": base_intensity * 0.002,  # 2W
+            "cpu_load_liters_per_hour": base_intensity * 0.008,  # 8W
+            "gpu_load_liters_per_hour": base_intensity * 0.012,  # 12W
+            "max_liters_per_hour": base_intensity * 0.015,  # 15W
+            "cooling_overhead": 1.0,  # No active cooling
+            "infrastructure_overhead": 1.0
+        }
+    }
+    
+    return profiles.get(capabilities.device_category, profiles["desktop_cpu"])
+
+
 def estimate_cooling_overhead(capabilities: HardwareCapabilities) -> float:
     """
     Estimate cooling overhead factor based on device category
@@ -436,3 +746,43 @@ def get_carbon_intensity_region() -> float:
         return default_carbon_intensity
     except:
         return default_carbon_intensity
+
+
+def calculate_water_footprint_from_energy(energy_kwh: float, capabilities: HardwareCapabilities) -> Dict[str, float]:
+    """
+    Calculate water footprint from energy consumption
+    
+    Args:
+        energy_kwh: Energy consumption in kWh
+        capabilities: Hardware capabilities with water intensity factor
+        
+    Returns:
+        Dictionary with water footprint metrics
+    """
+    # Direct water consumption from energy
+    direct_water_liters = energy_kwh * capabilities.water_intensity_factor
+    
+    # Get device-specific water profile
+    water_profile = get_device_water_profile(capabilities)
+    
+    # Apply cooling and infrastructure overhead
+    cooling_overhead = water_profile.get("cooling_overhead", 1.0)
+    infrastructure_overhead = water_profile.get("infrastructure_overhead", 1.0)
+    
+    # Total water footprint
+    total_water_liters = direct_water_liters * cooling_overhead * infrastructure_overhead
+    
+    # Water footprint breakdown
+    cooling_water_liters = direct_water_liters * (cooling_overhead - 1.0)
+    infrastructure_water_liters = direct_water_liters * cooling_overhead * (infrastructure_overhead - 1.0)
+    
+    return {
+        "direct_water_liters": direct_water_liters,
+        "cooling_water_liters": cooling_water_liters,
+        "infrastructure_water_liters": infrastructure_water_liters,
+        "total_water_liters": total_water_liters,
+        "water_intensity_factor": capabilities.water_intensity_factor,
+        "region": capabilities.region,
+        "cooling_overhead_factor": cooling_overhead,
+        "infrastructure_overhead_factor": infrastructure_overhead
+    }
