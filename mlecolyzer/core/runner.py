@@ -18,7 +18,7 @@ from codecarbon import EmissionsTracker
 
 # Import our monitoring and utility modules
 from ..monitoring.environmental import AdaptiveEnvironmentalTracker
-from ..monitoring.hardware import detect_hardware_capabilities
+from ..monitoring.hardware import detect_hardware_capabilities, calculate_water_footprint_from_energy
 from ..models.loader import ModelLoader
 from ..datasets.loader import DatasetLoader
 from ..metrics.accuracy import AccuracyMetrics
@@ -37,20 +37,22 @@ class EcoLyzer:
     Key Features:
     - Multi-framework support (HuggingFace, scikit-learn, PyTorch)
     - Adaptive hardware detection and monitoring stack initialization
-    - Comprehensive environmental metrics (power, thermal, emissions, battery)
+    - Comprehensive environmental metrics (power, thermal, emissions, battery, water)
     - Scientific quantization analysis with empirical validation
     - Robust dataset handling with intelligent fallback mechanisms
     - Cross-platform compatibility with graceful degradation
     - Integration with wandb for advanced monitoring (when beneficial)
     - Extensive error handling and quality assessment
+    - Water footprint tracking and analysis
 
     Environmental Impact Methodology:
     The framework measures multiple dimensions of environmental impact:
     1. Carbon Emissions: Direct CO2 emissions from energy consumption
-    2. Energy Consumption: Power usage patterns and efficiency analysis
-    3. Thermal Impact: Heat generation and cooling requirements
-    4. Resource Utilization: Hardware efficiency and optimization potential
-    5. Quantization Benefits: Power savings from model optimization
+    2. Water Footprint: Direct and indirect water consumption from energy and cooling
+    3. Energy Consumption: Power usage patterns and efficiency analysis
+    4. Thermal Impact: Heat generation and cooling requirements
+    5. Resource Utilization: Hardware efficiency and optimization potential
+    6. Quantization Benefits: Power and water savings from model optimization
 
     Scientific Validation:
     All measurements and calculations are based on established standards:
@@ -58,6 +60,7 @@ class EcoLyzer:
     - JEDEC standards for battery and semiconductor specifications
     - Academic literature for thermal and power modeling
     - Industry benchmarks for quantization impact assessment
+    - Regional water intensity factors for accurate water footprint calculation
 
     References:
     - Strubell et al. (2019) "Energy and Policy Considerations for Deep Learning in NLP"
@@ -98,7 +101,7 @@ class EcoLyzer:
 
         # Initialize environmental tracker
         try:
-            self.environmental_tracker = AdaptiveEnvironmentalTracker(config)
+            self.environmental_tracker = AdaptiveEnvironmentalTracker(config, self.capabilities)
         except Exception as e:
             print(f"⚠️ Environmental tracking initialization failed: {e}")
             self.environmental_tracker = self._create_minimal_tracker(config)
@@ -138,6 +141,7 @@ class EcoLyzer:
         print(f"✅ EcoLyzer initialized successfully!")
         print(f"   Hardware Category: {self.capabilities.device_category}")
         print(f"   Monitoring Methods: {len(self.capabilities.monitoring_methods)}")
+        print(f"   Water Intensity: {self.capabilities.water_intensity_factor:.2f} L/kWh ({self.capabilities.region})")
         print(f"   wandb Integration: {'Enabled' if self.wandb_enabled else 'Disabled'}")
 
     def _create_minimal_tracker(self, config: Dict[str, Any]):
@@ -150,6 +154,7 @@ class EcoLyzer:
                 return {
                     "assessment_metadata": {"minimal_mode": True},
                     "integrated_assessment": {"overall_efficiency_score": 0.5},
+                    "water_analysis": {"total_water_liters": 0.0, "water_efficiency": 0.5},
                     "recommendations": ["Full environmental tracking unavailable - install required dependencies"]
                 }
 
@@ -192,7 +197,9 @@ class EcoLyzer:
                         "device_category": self.capabilities.device_category,
                         "has_gpu": self.capabilities.has_gpu,
                         "gpu_count": self.capabilities.gpu_count,
-                        "monitoring_methods": self.capabilities.monitoring_methods
+                        "monitoring_methods": self.capabilities.monitoring_methods,
+                        "water_intensity_factor": self.capabilities.water_intensity_factor,
+                        "region": self.capabilities.region
                     }
                 }
             }
@@ -228,6 +235,10 @@ class EcoLyzer:
 
         # Thermal tracking (always available with fallback estimation)
         self.specialized_trackers["thermal"] = True
+
+        # Water footprint tracking (always available)
+        self.specialized_trackers["water"] = True
+        print("💧 Water footprint tracking enabled")
 
         # Battery tracking (mobile/laptop devices)
         if self.capabilities.has_battery:
@@ -476,7 +487,7 @@ class EcoLyzer:
            a. Load model with hardware optimizations
            b. Load dataset with robust fallback handling
            c. Run comprehensive environmental monitoring during inference
-           d. Compute accuracy metrics and environmental impact
+           d. Compute accuracy metrics and environmental impact including water footprint
            e. Perform quantization analysis and optimization recommendations
         3. Aggregate results and generate comprehensive report
         4. Save results with full traceability and citations
@@ -510,6 +521,7 @@ class EcoLyzer:
         print(f"📊 Evaluating {compatible_combinations} compatible model-dataset combinations")
         print(f"🖥️ Hardware: {self.capabilities.device_category}")
         print(f"⚡ Monitoring: {', '.join(self.capabilities.monitoring_methods)}")
+        print(f"💧 Water tracking: {self.capabilities.water_intensity_factor:.2f} L/kWh ({self.capabilities.region})")
         print(f"{'='*80}")
 
         combination_count = 0
@@ -638,6 +650,10 @@ class EcoLyzer:
                     pue_factor = 1.2 if self.capabilities.device_category == "datacenter" else 1.0
                     pue_adjusted_emissions = total_emissions * pue_factor
 
+                    # Calculate water footprint from total energy consumption
+                    total_energy_kwh = (loading_emissions + inference_emissions + metrics_emissions) / 0.5  # Rough conversion
+                    water_footprint = calculate_water_footprint_from_energy(total_energy_kwh, self.capabilities)
+
                     # Generate unique result key
                     result_key = f"{framework}__{model_name}__{dataset_name}"
                     if subset:
@@ -668,7 +684,9 @@ class EcoLyzer:
                             "platform": self.capabilities.platform,
                             "has_gpu": self.capabilities.has_gpu,
                             "gpu_count": self.capabilities.gpu_count,
-                            "monitoring_methods": self.capabilities.monitoring_methods
+                            "monitoring_methods": self.capabilities.monitoring_methods,
+                            "water_intensity_factor": self.capabilities.water_intensity_factor,
+                            "region": self.capabilities.region
                         },
 
                         # Accuracy metrics
@@ -685,6 +703,20 @@ class EcoLyzer:
                             "emissions_per_sample": total_emissions / len(predictions) if predictions else 0
                         },
 
+                        # Water footprint analysis
+                        "water_analysis": {
+                            "total_water_liters": water_footprint["total_water_liters"],
+                            "direct_water_liters": water_footprint["direct_water_liters"],
+                            "cooling_water_liters": water_footprint["cooling_water_liters"],
+                            "infrastructure_water_liters": water_footprint["infrastructure_water_liters"],
+                            "water_per_sample": water_footprint["total_water_liters"] / len(predictions) if predictions else 0,
+                            "water_intensity_factor": water_footprint["water_intensity_factor"],
+                            "region": water_footprint["region"],
+                            "water_equivalent_bottles": water_footprint["total_water_liters"] / 0.5,  # 500ml bottles
+                            "cooling_overhead_factor": water_footprint["cooling_overhead_factor"],
+                            "infrastructure_overhead_factor": water_footprint["infrastructure_overhead_factor"]
+                        },
+
                         # Comprehensive environmental assessment
                         "environmental_assessment": environmental_metrics,
 
@@ -693,7 +725,8 @@ class EcoLyzer:
                             "monitoring_duration": environmental_metrics.get("assessment_metadata", {}).get("duration_seconds", 0),
                             "measurement_quality": environmental_metrics.get("assessment_quality", {}),
                             "data_sources": self.capabilities.monitoring_methods,
-                            "wandb_enabled": self.wandb_enabled
+                            "wandb_enabled": self.wandb_enabled,
+                            "water_tracking_enabled": True
                         },
 
                         # Timing information
@@ -728,8 +761,11 @@ class EcoLyzer:
                             "framework": framework,
                             "total_emissions": total_emissions,
                             "pue_adjusted_emissions": pue_adjusted_emissions,
+                            "total_water_liters": water_footprint["total_water_liters"],
+                            "water_bottles_equivalent": water_footprint["total_water_liters"] / 0.5,
                             "accuracy_score": accuracy_metrics.get("accuracy", accuracy_metrics.get("bleu_score", 0)),
                             "environmental_efficiency_score": environmental_metrics.get("integrated_assessment", {}).get("overall_efficiency_score", 0),
+                            "water_efficiency_score": environmental_metrics.get("water_analysis", {}).get("water_efficiency", 0.5),
                             "model_dataset_key": result_key
                         })
 
@@ -737,13 +773,17 @@ class EcoLyzer:
                         wandb.log(accuracy_metrics)
                         if environmental_metrics.get("power_analysis"):
                             wandb.log(environmental_metrics["power_analysis"])
+                        if environmental_metrics.get("water_analysis"):
+                            wandb.log(environmental_metrics["water_analysis"])
 
                     # Print summary for this combination
                     print(f"✅ Evaluation {combination_count} Complete:")
                     print(f"   Framework: {framework}")
                     print(f"   Total CO2: {total_emissions:.6f} kg (PUE-adjusted: {pue_adjusted_emissions:.6f} kg)")
+                    print(f"   Total Water: {water_footprint['total_water_liters']:.3f} L ({water_footprint['total_water_liters']/0.5:.1f} bottles)")
                     print(f"   Accuracy: {accuracy_metrics.get('accuracy', accuracy_metrics.get('bleu_score', 'N/A'))}")
                     print(f"   Environmental Score: {environmental_metrics.get('integrated_assessment', {}).get('overall_efficiency_score', 'N/A')}")
+                    print(f"   Water Efficiency: {environmental_metrics.get('water_analysis', {}).get('water_efficiency', 'N/A')}")
                     print(f"   Samples Processed: {len(predictions)}/{self._current_dataset_size}")
 
                 except Exception as e:
@@ -781,7 +821,7 @@ class EcoLyzer:
         return self.results
 
     def _generate_final_report(self) -> Dict[str, Any]:
-        """Generate comprehensive final report with analysis and insights"""
+        """Generate comprehensive final report with analysis and insights including water footprint"""
         successful_results = {k: v for k, v in self.results.items() if not k.startswith('ERROR')}
 
         if not successful_results:
@@ -790,19 +830,33 @@ class EcoLyzer:
         # Aggregate statistics
         total_emissions = sum(r["emissions_analysis"]["total_kg_co2"] for r in successful_results.values())
         avg_emissions = total_emissions / len(successful_results)
+        
+        # Water footprint statistics
+        total_water = sum(r["water_analysis"]["total_water_liters"] for r in successful_results.values())
+        avg_water = total_water / len(successful_results)
 
         # Framework analysis
         framework_stats = {}
         for result in successful_results.values():
             framework = result.get("framework", "unknown")
             if framework not in framework_stats:
-                framework_stats[framework] = {"count": 0, "total_emissions": 0, "efficiency_scores": []}
+                framework_stats[framework] = {
+                    "count": 0, 
+                    "total_emissions": 0, 
+                    "total_water": 0,
+                    "efficiency_scores": [],
+                    "water_efficiency_scores": []
+                }
             
             framework_stats[framework]["count"] += 1
             framework_stats[framework]["total_emissions"] += result["emissions_analysis"]["total_kg_co2"]
+            framework_stats[framework]["total_water"] += result["water_analysis"]["total_water_liters"]
             
             efficiency = result.get("environmental_assessment", {}).get("integrated_assessment", {}).get("overall_efficiency_score", 0)
             framework_stats[framework]["efficiency_scores"].append(efficiency)
+            
+            water_efficiency = result.get("environmental_assessment", {}).get("water_analysis", {}).get("water_efficiency", 0.5)
+            framework_stats[framework]["water_efficiency_scores"].append(water_efficiency)
 
         # Environmental efficiency analysis
         efficiency_scores = [
@@ -816,9 +870,14 @@ class EcoLyzer:
                 "failed_evaluations": len([k for k in self.results.keys() if k.startswith('ERROR')]),
                 "total_co2_emissions_kg": total_emissions,
                 "average_co2_per_evaluation_kg": avg_emissions,
+                "total_water_liters": total_water,
+                "average_water_per_evaluation_liters": avg_water,
+                "water_bottles_equivalent": total_water / 0.5,
                 "hardware_category": self.capabilities.device_category,
                 "monitoring_capabilities": self.capabilities.monitoring_methods,
-                "frameworks_analyzed": list(framework_stats.keys())
+                "frameworks_analyzed": list(framework_stats.keys()),
+                "water_intensity_factor": self.capabilities.water_intensity_factor,
+                "region": self.capabilities.region
             },
 
             "framework_analysis": {
@@ -826,7 +885,10 @@ class EcoLyzer:
                     "evaluation_count": stats["count"],
                     "total_emissions_kg": stats["total_emissions"],
                     "avg_emissions_kg": stats["total_emissions"] / stats["count"],
-                    "avg_efficiency_score": sum(stats["efficiency_scores"]) / len(stats["efficiency_scores"]) if stats["efficiency_scores"] else 0
+                    "total_water_liters": stats["total_water"],
+                    "avg_water_liters": stats["total_water"] / stats["count"],
+                    "avg_efficiency_score": sum(stats["efficiency_scores"]) / len(stats["efficiency_scores"]) if stats["efficiency_scores"] else 0,
+                    "avg_water_efficiency_score": sum(stats["water_efficiency_scores"]) / len(stats["water_efficiency_scores"]) if stats["water_efficiency_scores"] else 0
                 }
                 for framework, stats in framework_stats.items()
             },
@@ -836,15 +898,29 @@ class EcoLyzer:
                 "efficiency_score_std": np.std(efficiency_scores) if efficiency_scores else 0,
                 "best_efficiency": max(efficiency_scores) if efficiency_scores else 0,
                 "worst_efficiency": min(efficiency_scores) if efficiency_scores else 0,
+                "water_intensity_used": self.capabilities.water_intensity_factor,
+                "region_analyzed": self.capabilities.region
+            },
+
+            "water_impact_analysis": {
+                "total_water_footprint_liters": total_water,
+                "average_water_per_model_liters": avg_water,
+                "water_bottles_equivalent": total_water / 0.5,
+                "water_gallons_equivalent": total_water / 3.785,
+                "regional_water_intensity": self.capabilities.water_intensity_factor,
+                "water_efficiency_recommendations": self._generate_water_recommendations(total_water, avg_water)
             },
 
             "methodology_validation": {
                 "monitoring_method_coverage": self.capabilities.monitoring_methods,
+                "water_tracking_enabled": True,
                 "scientific_standards_applied": [
                     "IEEE 754 floating-point standards",
                     "JEDEC battery specifications",
                     "ASHRAE thermal guidelines",
-                    "CodeCarbon emissions methodology"
+                    "CodeCarbon emissions methodology",
+                    "Regional water intensity factors",
+                    "Data center PUE standards"
                 ]
             }
         }
@@ -853,6 +929,24 @@ class EcoLyzer:
         self.results["final_report"] = final_report
 
         return final_report
+
+    def _generate_water_recommendations(self, total_water: float, avg_water: float) -> List[str]:
+        """Generate water-specific recommendations"""
+        recommendations = []
+        
+        if total_water > 5.0:  # More than 5 liters total
+            recommendations.append("Consider model quantization to reduce water footprint")
+        
+        if avg_water > 1.0:  # More than 1 liter per evaluation
+            recommendations.append("High water usage per evaluation - optimize model size and inference efficiency")
+        
+        if self.capabilities.device_category == "datacenter" and total_water > 10.0:
+            recommendations.append("Data center water usage is high - investigate cooling system efficiency")
+        
+        if self.capabilities.water_intensity_factor > 3.0:
+            recommendations.append(f"Regional water intensity is high ({self.capabilities.water_intensity_factor:.1f} L/kWh) - consider renewable energy sources")
+        
+        return recommendations
 
     def save_results(self, output_dir: str = None, filename: str = None) -> None:
         """Save comprehensive results with metadata and citations"""
@@ -872,11 +966,13 @@ class EcoLyzer:
                 "total_evaluations": len([k for k in self.results.keys() if not k.startswith('ERROR')]),
                 "failed_evaluations": len([k for k in self.results.keys() if k.startswith('ERROR')]),
                 "monitoring_methods_used": self.capabilities.monitoring_methods,
+                "water_tracking_enabled": True,
                 "scientific_standards": [
                     "IEEE 754-2019: Floating-point arithmetic standard",
                     "JEDEC No. 21-C: Li-ion battery specifications",
                     "ASHRAE TC 9.9: Data center thermal guidelines",
-                    "CodeCarbon: Carbon emissions tracking methodology"
+                    "CodeCarbon: Carbon emissions tracking methodology",
+                    "Regional water intensity factors: Data center and energy mix analysis"
                 ]
             },
             "results": self.results
@@ -907,10 +1003,15 @@ class EcoLyzer:
                     "task": result.get("task", ""),
                     "device_category": result.get("hardware_profile", {}).get("device_category", ""),
                     "total_co2_kg": result.get("emissions_analysis", {}).get("total_kg_co2", 0),
+                    "total_water_liters": result.get("water_analysis", {}).get("total_water_liters", 0),
+                    "water_bottles_equivalent": result.get("water_analysis", {}).get("water_equivalent_bottles", 0),
                     "efficiency_score": result.get("environmental_assessment", {}).get("integrated_assessment", {}).get("overall_efficiency_score", 0),
+                    "water_efficiency_score": result.get("environmental_assessment", {}).get("water_analysis", {}).get("water_efficiency", 0),
                     "accuracy": result.get("accuracy_metrics", {}).get("accuracy", result.get("accuracy_metrics", {}).get("bleu_score", 0)),
                     "samples_processed": result.get("successful_predictions", 0),
-                    "dataset_size": result.get("dataset_size", 0)
+                    "dataset_size": result.get("dataset_size", 0),
+                    "region": result.get("hardware_profile", {}).get("region", ""),
+                    "water_intensity_factor": result.get("hardware_profile", {}).get("water_intensity_factor", 0)
                 }
                 summary_data.append(summary_row)
 
