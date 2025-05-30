@@ -260,13 +260,13 @@ classical = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ml-ecolyzer/ml-ecolyzer"
-Repository = "https://github.com/ml-ecolyzer/ml-ecolyzer"
+Homepage = "https://github.com/JomaMinoza/ml-ecolyzer"
+Repository = "https://github.com/JomaMinoza/ml-ecolyzer"
 Documentation = "https://ml-ecolyzer.readthedocs.io"
-"Bug Reports" = "https://github.com/ml-ecolyzer/ml-ecolyzer/issues"
+"Bug Reports" = "https://github.com/JomaMinoza/ml-ecolyzer/issues"
 "Paper" = "https://arxiv.org/abs/xxxx.xxxxx"
 "PyPI" = "https://pypi.org/project/ml-ecolyzer"
-"Discussions" = "https://github.com/ml-ecolyzer/ml-ecolyzer/discussions"
+"Discussions" = "https://github.com/JomaMinoza/ml-ecolyzer/discussions"
 
 [project.scripts]
 mlecolyzer = "mlecolyzer.cli.main:main"

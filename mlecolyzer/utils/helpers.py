@@ -47,7 +47,7 @@ def setup_logging(level: str = "INFO", use_rich: bool = None) -> logging.Logger:
     log_level = level_map.get(level.upper(), logging.INFO)
     
     # Clear existing handlers
-    logger = logging.getLogger("genbench")
+    logger = logging.getLogger("ml-ecolyzer")
     logger.handlers.clear()
     
     if use_rich:
@@ -84,10 +84,10 @@ def get_default_config() -> Dict[str, Any]:
         Default configuration dictionary
     """
     return {
-        "project": "genbench_default",
+        "project": "ml_ecolyzer_default",
         "models": [],
         "datasets": [],
-        "output_dir": "./genbench_results",
+        "output_dir": "./ml_ecolyzer_results",
         "monitoring_duration": 300,
         "enable_quantization_analysis": True,
         "enable_frequency_analysis": True,
@@ -463,7 +463,7 @@ def generate_report_html(results: Dict[str, Any], output_path: Union[str, Path])
     <!DOCTYPE html>
     <html>
     <head>
-        <title>GenBench Results Report</title>
+        <title>ML Ecolyzer Results Report</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             .header { background-color: #f0f0f0; padding: 20px; border-radius: 5px; }
@@ -476,7 +476,7 @@ def generate_report_html(results: Dict[str, Any], output_path: Union[str, Path])
     </head>
     <body>
         <div class="header">
-            <h1>GenBench Results Report</h1>
+            <h1>ML Ecolyzer Results Report</h1>
             <p>Generated on: {timestamp}</p>
         </div>
         

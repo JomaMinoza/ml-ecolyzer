@@ -402,7 +402,7 @@ print("Mobile deployment insights:", deployment_analysis)
 
 ```bash
 # Clone repository
-git clone https://github.com/ml-ecolyzer/ml-ecolyzer.git
+git clone https://github.com/JomaMinoza/ml-ecolyzer.git
 cd ml-ecolyzer
 
 # Create research environment
