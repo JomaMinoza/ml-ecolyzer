@@ -9,6 +9,9 @@ import time
 import platform
 import json
 import os
+import gc
+import psutil
+
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 import torch
@@ -545,6 +548,7 @@ class EcoLyzer:
                     print(f"⏭️ Skipping {model_name} on {dataset_name} (framework/task mismatch)")
                     continue
 
+
                 combination_count += 1
 
                 # Extract dataset configuration
@@ -570,6 +574,10 @@ class EcoLyzer:
                 print(f"{'='*60}")
 
                 try:
+
+                    # Implement memory cleanup before each run
+                    self._cleanup_memory()                             
+
                     # Phase 1: Model and dataset loading with emissions tracking
                     print("📥 Phase 1: Loading model and dataset...")
                     self.primary_tracker.start()
@@ -801,6 +809,15 @@ class EcoLyzer:
                     }
 
                     continue
+                finally:
+                    # Ensure primary tracker is stopped
+                    self.primary_tracker.stop()
+                    
+                    # Aggressive memory cleanup after each combination
+                    self._cleanup_memory()  
+                    
+                    
+        # Finalize wandb run if enabled\
 
         # Generate final comprehensive report
         final_report = self._generate_final_report()
@@ -819,6 +836,59 @@ class EcoLyzer:
         print(f"{'='*80}")
 
         return self.results
+    
+    def _cleanup_memory(self):
+        """Aggressive memory cleanup"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        gc.collect()
+        
+        # Log memory status
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1e9
+            cached = torch.cuda.memory_reserved() / 1e9
+            print(f"🔧 GPU Memory: {allocated:.1f}GB allocated, {cached:.1f}GB cached")    
+
+    def _monitor_resources(self) -> Dict[str, float]:
+        """Monitor system resources"""
+        try:
+            # CPU and Memory
+            cpu_percent = psutil.cpu_percent()
+            memory = psutil.virtual_memory()
+            
+            resources = {
+                "cpu_percent": cpu_percent,
+                "memory_percent": memory.percent,
+                "memory_available_gb": memory.available / (1024**3)
+            }
+            
+            # GPU Memory
+            if torch.cuda.is_available():
+                resources.update({
+                    "gpu_memory_allocated_gb": torch.cuda.memory_allocated() / 1e9,
+                    "gpu_memory_cached_gb": torch.cuda.memory_reserved() / 1e9,
+                    "gpu_utilization": self._get_gpu_utilization()
+                })
+                
+            return resources
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _check_memory_pressure(self) -> bool:
+        """Check if system is under memory pressure"""
+        try:
+            memory = psutil.virtual_memory()
+            gpu_pressure = False
+            
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated()
+                total = torch.cuda.get_device_properties(0).total_memory
+                gpu_pressure = (allocated / total) > 0.8
+                
+            return memory.percent > 85 or gpu_pressure
+        except:
+            return False
 
     def _generate_final_report(self) -> Dict[str, Any]:
         """Generate comprehensive final report with analysis and insights including water footprint"""
