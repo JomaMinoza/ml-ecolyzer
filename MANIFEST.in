@@ -15,6 +15,9 @@ recursive-include docs *.md *.rst *.txt
 # Configuration files
 recursive-include mlecolyzer *.yaml *.yml *.json
 
+# Include data
+recursive-include mlecolyzer/data *.csv
+
 # Exclude development files
 exclude .gitignore
 exclude .pre-commit-config.yaml

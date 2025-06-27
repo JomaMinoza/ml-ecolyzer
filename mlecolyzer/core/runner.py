@@ -27,6 +27,7 @@ from ..datasets.loader import DatasetLoader
 from ..metrics.accuracy import AccuracyMetrics
 from ..utils.validation import validate_config
 from ..utils.helpers import setup_logging
+from ..utils.parameters import ParameterEstimator, ParameterResult
 
 
 class EcoLyzer:
@@ -587,6 +588,22 @@ class EcoLyzer:
                         model_name, task_type, framework, specified_model_type, **model_params
                     )
 
+                    print("🔢 Phase 1.5: Model parameter analysis...")
+                    parameter_result = self.parameter_estimator.count_parameters(
+                        model=model,
+                        model_config=model_cfg,
+                        model_name=model_name,
+                        framework=framework
+                    )
+                    
+                    print(f"   📊 Parameters: {parameter_result.count:,} ({parameter_result.source}, {parameter_result.confidence} confidence)")
+                    print(f"   🏗️ Model family: {parameter_result.details.get('model_family', 'Unknown')}")
+                    
+                    if parameter_result.source == "pytorch" and "parameter_breakdown" in parameter_result.details:
+                        breakdown = parameter_result.details["parameter_breakdown"]
+                        print(f"   🧱 Top layers: {list(breakdown.items())[:3]}")
+
+
                     # Load dataset
                     dataset = self.load_dataset(
                         dataset_name=dataset_name,
@@ -668,6 +685,28 @@ class EcoLyzer:
                         result_key += f"__{subset}"
                     result_key += f"__{self._current_dataset_split}"
 
+                    # Calculate ESS if enabled
+                    ess_analysis = None
+                    if model_cfg.get("enable_ess_calculation", True):
+                        ess_score = self.parameter_estimator.calculate_ess(
+                            parameter_count=parameter_result.count,
+                            co2_kg=total_emissions
+                        )
+                        
+                        ess_analysis = self.parameter_estimator.get_ess_insights(
+                            ess_score=ess_score,
+                            parameter_count=parameter_result.count,
+                            co2_kg=total_emissions
+                        )
+                        
+                        print(f"   🌱 ESS Score: {ess_score:.6f} ({ess_analysis['ess_category']})")
+                        print(f"   💡 {ess_analysis['message']}")
+                        
+                        # Check against target ESS if specified
+                        ess_target = model_cfg.get("ess_target")
+                        if ess_target and ess_score < ess_target:
+                            print(f"   ⚠️ ESS below target: {ess_score:.6f} < {ess_target:.6f}")
+
                     # Comprehensive result compilation
                     comprehensive_result = {
                         # Basic identification
@@ -677,6 +716,17 @@ class EcoLyzer:
                         "subset": subset,
                         "task": task_type,
                         "model_type": model_type,
+
+                        "model_analysis": {
+                            "parameter_count": parameter_result.count,
+                            "parameter_source": parameter_result.source,
+                            "parameter_confidence": parameter_result.confidence,
+                            "parameter_details": parameter_result.details,
+                            "effective_parameters_m": parameter_result.count / 1_000_000,
+                            "model_size_mb": parameter_result.details.get("model_size_mb"),
+                            "parameter_breakdown": parameter_result.details.get("parameter_breakdown", {})
+                        },
+                                                
 
                         # Dataset information
                         "split_used": self._current_dataset_split,
@@ -699,6 +749,11 @@ class EcoLyzer:
 
                         # Accuracy metrics
                         "accuracy_metrics": accuracy_metrics,
+
+                        "sustainability_metrics": ess_analysis if ess_analysis else {
+                            "ess_calculation_disabled": True
+                        },
+                                          
 
                         # Emissions breakdown
                         "emissions_analysis": {
@@ -726,8 +781,20 @@ class EcoLyzer:
                         },
 
                         # Comprehensive environmental assessment
-                        "environmental_assessment": environmental_metrics,
-
+                        "environmental_assessment": {
+                            **environmental_metrics,
+                            # Add parameter efficiency context
+                            "parameter_efficiency": {
+                                "parameters_per_gram_co2": parameter_result.count / (total_emissions * 1000) if total_emissions > 0 else 0,
+                                "co2_per_million_parameters": (total_emissions * 1000) / (parameter_result.count / 1_000_000) if parameter_result.count > 0 else 0
+                            }
+                        },
+                        
+                        # Enhanced recommendations including ESS
+                        "recommendations": self._generate_enhanced_recommendations(
+                            environmental_metrics, parameter_result, ess_analysis
+                        ),
+                        
                         # Quality and reliability indicators
                         "assessment_quality": {
                             "monitoring_duration": environmental_metrics.get("assessment_metadata", {}).get("duration_seconds", 0),
@@ -774,6 +841,12 @@ class EcoLyzer:
                             "accuracy_score": accuracy_metrics.get("accuracy", accuracy_metrics.get("bleu_score", 0)),
                             "environmental_efficiency_score": environmental_metrics.get("integrated_assessment", {}).get("overall_efficiency_score", 0),
                             "water_efficiency_score": environmental_metrics.get("water_analysis", {}).get("water_efficiency", 0.5),
+                            "parameter_count": parameter_result.count,
+                            "parameter_source": parameter_result.source,
+                            "effective_parameters_m": parameter_result.count / 1_000_000,
+                            "ess_score": ess_analysis["ess_score"] if ess_analysis else None,
+                            "ess_category": ess_analysis["ess_category"] if ess_analysis else None,
+                            "parameters_per_gram_co2": parameter_result.count / (total_emissions * 1000) if total_emissions > 0 else 0,                            
                             "model_dataset_key": result_key
                         })
 
@@ -788,6 +861,8 @@ class EcoLyzer:
                     print(f"✅ Evaluation {combination_count} Complete:")
                     print(f"   Framework: {framework}")
                     print(f"   Total CO2: {total_emissions:.6f} kg (PUE-adjusted: {pue_adjusted_emissions:.6f} kg)")
+                    print(f"   Parameters: {parameter_result.count:,} ({parameter_result.source})")
+                    print(f"   ESS Score: {ess_analysis['ess_score']:.6f} ({ess_analysis['ess_category']})" if ess_analysis else "   ESS: Disabled")
                     print(f"   Total Water: {water_footprint['total_water_liters']:.3f} L ({water_footprint['total_water_liters']/0.5:.1f} bottles)")
                     print(f"   Accuracy: {accuracy_metrics.get('accuracy', accuracy_metrics.get('bleu_score', 'N/A'))}")
                     print(f"   Environmental Score: {environmental_metrics.get('integrated_assessment', {}).get('overall_efficiency_score', 'N/A')}")
@@ -836,7 +911,42 @@ class EcoLyzer:
         print(f"{'='*80}")
 
         return self.results
-    
+
+    def _generate_enhanced_recommendations(
+        self,
+        environmental_metrics: Dict[str, Any],
+        parameter_result: Any,
+        ess_analysis: Optional[Dict[str, Any]] = None
+    ) -> List[str]:
+        """
+        Merge recommendations from environmental, parameter, and ESS analysis.
+        """
+        recs = []
+        recs += environmental_metrics.get("recommendations", [])
+
+        if hasattr(parameter_result, "count") and parameter_result.count:
+            c = parameter_result.count
+            if c > 1_000_000_000:
+                recs.append("Consider a smaller model or quantization for efficiency.")
+            elif c < 10_000_000:
+                recs.append("Model is very small and already efficient.")
+
+        if ess_analysis and not ess_analysis.get("ess_calculation_disabled"):
+            m = ess_analysis.get("message")
+            if m:
+                recs.append(m)
+            if ess_analysis.get("ess_category") == "very_poor":
+                recs.append("Critical: Very low efficiency. Try pruning, quantization, or another architecture.")
+
+        out = []
+        seen = set()
+        for r in recs:
+            if r and r not in seen:
+                out.append(r)
+                seen.add(r)
+        return out
+
+
     def _cleanup_memory(self):
         """Aggressive memory cleanup"""
         if torch.cuda.is_available():
@@ -874,6 +984,28 @@ class EcoLyzer:
             return resources
         except Exception as e:
             return {"error": str(e)}
+
+    def _get_gpu_utilization(self) -> Optional[List[Optional[int]]]:
+        """
+        Return current GPU utilization percent(s), or None.
+        """
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            n = getattr(self.capabilities, "gpu_count", 0)
+            if not isinstance(n, int) or n < 1:
+                return None
+            vals = []
+            for i in range(n):
+                try:
+                    h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    util = pynvml.nvmlDeviceGetUtilizationRates(h)
+                    vals.append(util.gpu)
+                except Exception:
+                    vals.append(None)
+            return vals if vals else None
+        except Exception:
+            return None
 
     def _check_memory_pressure(self) -> bool:
         """Check if system is under memory pressure"""
@@ -1095,3 +1227,121 @@ class EcoLyzer:
             print("⚠️ pandas not available - skipping CSV export")
         except Exception as e:
             print(f"⚠️ CSV export failed: {e}")
+
+
+    def _analyze_parameters(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze parameter statistics across all models"""
+        parameter_counts = []
+        parameter_sources = {}
+        model_families = {}
+        
+        for result in results.values():
+            model_analysis = result.get("model_analysis", {})
+            param_count = model_analysis.get("parameter_count", 0)
+            param_source = model_analysis.get("parameter_source", "unknown")
+            model_family = model_analysis.get("parameter_details", {}).get("model_family", "Unknown")
+            
+            parameter_counts.append(param_count)
+            
+            if param_source not in parameter_sources:
+                parameter_sources[param_source] = 0
+            parameter_sources[param_source] += 1
+            
+            if model_family not in model_families:
+                model_families[model_family] = []
+            model_families[model_family].append(param_count)
+
+        return {
+            "total_parameters": sum(parameter_counts),
+            "average_parameters": sum(parameter_counts) / len(parameter_counts) if parameter_counts else 0,
+            "parameter_range": (min(parameter_counts), max(parameter_counts)) if parameter_counts else (0, 0),
+            "parameter_sources": parameter_sources,
+            "model_families": {
+                family: {
+                    "count": len(params),
+                    "avg_parameters": sum(params) / len(params),
+                    "total_parameters": sum(params)
+                }
+                for family, params in model_families.items()
+            },
+            "parameter_distribution": {
+                "small_models": sum(1 for p in parameter_counts if p < 100_000_000),  # <100M
+                "medium_models": sum(1 for p in parameter_counts if 100_000_000 <= p < 1_000_000_000),  # 100M-1B
+                "large_models": sum(1 for p in parameter_counts if p >= 1_000_000_000)  # >1B
+            }
+        }
+
+    def _analyze_ess_scores(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze ESS scores across all models"""
+        ess_scores = {}
+        ess_categories = {}
+        
+        for key, result in results.items():
+            sustainability = result.get("sustainability_metrics", {})
+            if "ess_score" in sustainability:
+                model_name = result.get("model_name", key)
+                ess_score = sustainability["ess_score"]
+                ess_category = sustainability["ess_category"]
+                
+                ess_scores[model_name] = ess_score
+                
+                if ess_category not in ess_categories:
+                    ess_categories[ess_category] = 0
+                ess_categories[ess_category] += 1
+
+        if not ess_scores:
+            return {"ess_calculation_disabled": True}
+
+        # Use the parameter estimator's comparison functionality
+        comparison_result = self.parameter_estimator.compare_ess_scores(ess_scores)
+        
+        return {
+            **comparison_result,
+            "ess_category_distribution": ess_categories,
+            "efficiency_recommendations": self._generate_ess_recommendations(comparison_result)
+        }
+
+    def _generate_ess_recommendations(self, comparison_result: Dict[str, Any]) -> List[str]:
+        """Generate recommendations based on ESS analysis"""
+        recommendations = []
+        
+        if not comparison_result:
+            return recommendations
+        
+        summary = comparison_result.get("summary", {})
+        avg_ess = summary.get("average_ess", 0)
+        
+        if avg_ess < 0.1:
+            recommendations.append("Overall low ESS scores - consider model selection optimization")
+        elif avg_ess > 0.5:
+            recommendations.append("Good overall ESS performance - efficient model selection")
+        
+        best_model = summary.get("best_model", {})
+        if best_model:
+            recommendations.append(f"Most efficient model: {best_model['name']} (ESS: {best_model['ess']:.6f})")
+        
+        return recommendations
+
+    def _generate_parameter_efficiency_insights(self, results: Dict[str, Any]) -> List[str]:
+        """Generate insights about parameter efficiency"""
+        insights = []
+        
+        param_co2_ratios = []
+        for result in results.values():
+            param_count = result.get("model_analysis", {}).get("parameter_count", 0)
+            co2_kg = result.get("emissions_analysis", {}).get("total_kg_co2", 0)
+            
+            if param_count > 0 and co2_kg > 0:
+                ratio = param_count / (co2_kg * 1000)  # params per gram CO2
+                param_co2_ratios.append(ratio)
+        
+        if param_co2_ratios:
+            avg_ratio = sum(param_co2_ratios) / len(param_co2_ratios)
+            insights.append(f"Average parameter efficiency: {avg_ratio:,.0f} parameters per gram CO₂")
+            
+            if avg_ratio > 1_000_000:
+                insights.append("High parameter efficiency - models are well-optimized")
+            elif avg_ratio < 100_000:
+                insights.append("Low parameter efficiency - consider model optimization")
+        
+        return insights

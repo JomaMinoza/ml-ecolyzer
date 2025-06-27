@@ -7,8 +7,10 @@ for adaptive environmental monitoring across different device categories.
 
 import platform
 import os
+import csv
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+import importlib.resources
 
 try:
     import psutil
@@ -27,6 +29,29 @@ try:
     HAS_PYNVML = True
 except ImportError:
     HAS_PYNVML = False
+
+# Module-level cache for GPU data
+_GPU_REFERENCE_DATA = None
+
+def _load_gpu_reference_data() -> Dict[str, Dict[str, Any]]:
+    global _GPU_REFERENCE_DATA
+    if _GPU_REFERENCE_DATA is None:
+        _GPU_REFERENCE_DATA = {}
+        with importlib.resources.files('mlecolyzer.data').joinpath('gpus.csv').open('r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Use 'id' or 'model' as the key—customize if needed
+                key = row.get('id') or row.get('model')
+                if key:
+                    _GPU_REFERENCE_DATA[key] = row
+    return _GPU_REFERENCE_DATA
+
+def get_gpu_reference(gpu_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Return reference data for a GPU given its id or model name.
+    """
+    data = _load_gpu_reference_data()
+    return data.get(gpu_id)
 
 
 @dataclass
@@ -64,14 +89,17 @@ class HardwareCapabilities:
     power_sensors: List[str]
     water_intensity_factor: float
     region: str
+    gpu_reference: Optional[List[Dict[str, Any]]] = None
+
+
 
 
 def detect_hardware_capabilities() -> HardwareCapabilities:
     """
-    Detect and assess hardware capabilities for environmental monitoring
-    
+    Detect and assess hardware capabilities for environmental monitoring.
+
     Returns:
-        HardwareCapabilities: Comprehensive hardware information
+        HardwareCapabilities: Comprehensive hardware information, including reference GPU data.
     """
     # Basic platform detection
     platform_name = platform.system().lower()
@@ -106,7 +134,19 @@ def detect_hardware_capabilities() -> HardwareCapabilities:
     device_category = _classify_device_category(
         has_gpu, gpu_count, gpu_names, has_battery, cpu_info, memory_info
     )
-    
+
+    # Get GPU reference data (list of dicts, one for each GPU detected)
+    gpu_reference = []
+    if has_gpu and gpu_names:
+        for name in gpu_names:
+            ref = get_gpu_reference(name)
+            if ref:
+                gpu_reference.append(ref)
+            else:
+                gpu_reference.append({"model": name, "reference": None})
+    else:
+        gpu_reference = []
+
     return HardwareCapabilities(
         platform=platform_name,
         device_category=device_category,
@@ -121,7 +161,8 @@ def detect_hardware_capabilities() -> HardwareCapabilities:
         thermal_sensors=thermal_sensors,
         power_sensors=power_sensors,
         water_intensity_factor=water_intensity_factor,
-        region=region
+        region=region,
+        gpu_reference=gpu_reference 
     )
 
 

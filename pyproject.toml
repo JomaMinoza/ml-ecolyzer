@@ -287,8 +287,10 @@ mlecolyzer = [
     "*.json", 
     "configs/**/*",
     "examples/**/*",
-    "templates/**/*"
+    "templates/**/*",
+    "data/*.csv"
 ]
+
 
 [tool.black]
 line-length = 88

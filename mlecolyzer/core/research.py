@@ -17,7 +17,7 @@ import torch
 import numpy as np
 
 from .runner import EcoLyzer
-
+from ..utils.parameters import ParameterEstimator
 
 def run_comprehensive_analysis(comprehensive_research_config: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -45,6 +45,9 @@ def run_comprehensive_analysis(comprehensive_research_config: Dict[str, Any]) ->
     # Extract configuration
     models = comprehensive_research_config["models"]
     datasets = comprehensive_research_config["datasets"]
+
+    # Initialize parameter estimator for ESS analysis
+    parameter_estimator = ParameterEstimator()    
 
     # Initialize overall results container
     overall_results = {
@@ -229,7 +232,10 @@ def run_comprehensive_analysis(comprehensive_research_config: Dict[str, Any]) ->
     print(f"📊 Success rate: {(successful_runs/(len(models) * len(datasets)))*100:.1f}%")
 
     # Generate aggregated analysis including water footprint
-    overall_results["aggregated_analysis"] = generate_aggregated_analysis(overall_results["individual_runs"])
+    overall_results["aggregated_analysis"] = generate_aggregated_analysis(
+        overall_results["individual_runs"], 
+        parameter_estimator
+    )
 
     # Add completion metadata
     overall_results["research_metadata"]["end_time"] = time.time()
@@ -309,7 +315,8 @@ def save_intermediate_results(overall_results: Dict[str, Any], results_dir: str,
         print(f"⚠️ Failed to save intermediate results: {e}")
 
 
-def generate_aggregated_analysis(individual_runs: Dict[str, Any]) -> Dict[str, Any]:
+def generate_aggregated_analysis(individual_runs: Dict[str, Any], 
+                                        parameter_estimator: ParameterEstimator) -> Dict[str, Any]:
     """Generate aggregated analysis across all successful runs including water footprint"""
 
     if not individual_runs:
@@ -323,7 +330,38 @@ def generate_aggregated_analysis(individual_runs: Dict[str, Any]) -> Dict[str, A
     model_performance = {}
     dataset_performance = {}
 
+    model_parameters = {}
+    model_ess_scores = {}
+    parameter_sources = {}
+    framework_ess = {}
+
+
     for run_id, result in individual_runs.items():
+
+        model_name = result.get("model_name", "unknown")
+        framework = result.get("framework", "unknown")
+        
+        # Parameter analysis
+        model_analysis = result.get("model_analysis", {})
+        param_count = model_analysis.get("parameter_count", 0)
+        param_source = model_analysis.get("parameter_source", "unknown")
+        
+        model_parameters[model_name] = param_count
+        
+        if param_source not in parameter_sources:
+            parameter_sources[param_source] = 0
+        parameter_sources[param_source] += 1
+        
+        # ESS analysis
+        sustainability = result.get("sustainability_metrics", {})
+        if "ess_score" in sustainability:
+            ess_score = sustainability["ess_score"]
+            model_ess_scores[model_name] = ess_score
+            
+            if framework not in framework_ess:
+                framework_ess[framework] = []
+            framework_ess[framework].append(ess_score)
+
         # CO2 emissions
         co2 = result["emissions_analysis"]["total_kg_co2"]
         co2_emissions.append(co2)
@@ -421,11 +459,40 @@ def generate_aggregated_analysis(individual_runs: Dict[str, Any]) -> Dict[str, A
             "water_efficiency_improvement_potential": calculate_water_efficiency_potential(model_performance)
         },
 
-        "research_insights": generate_research_insights(model_performance, dataset_performance, co2_emissions, water_consumption, efficiency_scores, water_efficiency_scores)
+        # Comprehensive parameter analysis
+        "parameter_analysis": {
+            "total_parameters_analyzed": sum(model_parameters.values()),
+            "average_parameters_per_model": sum(model_parameters.values()) / len(model_parameters) if model_parameters else 0,
+            "parameter_distribution": {
+                "model_parameter_counts": model_parameters,
+                "parameter_sources": parameter_sources,
+                "size_categories": _categorize_models_by_size(model_parameters)
+            },
+            "largest_model": max(model_parameters.items(), key=lambda x: x[1]) if model_parameters else None,
+            "smallest_model": min(model_parameters.items(), key=lambda x: x[1]) if model_parameters else None,
+            "parameter_range": (min(model_parameters.values()), max(model_parameters.values())) if model_parameters else (0, 0)
+        },
+        
+        # Comprehensive ESS analysis
+        "ess_analysis": _generate_comprehensive_ess_analysis(
+            model_ess_scores, framework_ess, parameter_estimator, individual_runs
+        ),
+
+
+        "research_insights": generate_research_insights(model_performance, dataset_performance, co2_emissions, water_consumption, efficiency_scores, water_efficiency_scores, model_parameters, model_ess_scores)
     }
 
-    return aggregated_analysis
+    ## ESS comparative analysis
+    ess_scores = [(run_id, result["sustainability_metrics"]["ess_score"]) 
+                  for run_id, result in individual_runs.items()]
+    
+    aggregated_analysis["ess_analysis"] = {
+        "model_ranking_by_ess": sorted(ess_scores, key=lambda x: x[1], reverse=True),
+        "ess_distribution": _calculate_ess_distribution(ess_scores)
+    }    
+    
 
+    return aggregated_analysis
 
 def calculate_water_efficiency_potential(model_performance: Dict[str, Any]) -> Dict[str, float]:
     """Calculate potential water efficiency improvements"""
@@ -450,10 +517,10 @@ def calculate_water_efficiency_potential(model_performance: Dict[str, Any]) -> D
     
     return {"improvement_potential_percent": 0.0}
 
-
 def generate_research_insights(model_performance: Dict, dataset_performance: Dict,
-                             co2_emissions: List[float], water_consumption: List[float],
-                             efficiency_scores: List[float], water_efficiency_scores: List[float]) -> List[str]:
+                                       co2_emissions: List[float], water_consumption: List[float],
+                                       efficiency_scores: List[float], water_efficiency_scores: List[float],
+                                       model_parameters: Dict[str, int], model_ess_scores: Dict[str, float]) -> List[str]:
     """Generate research insights from aggregated data including water footprint"""
     insights = []
 
@@ -483,7 +550,7 @@ def generate_research_insights(model_performance: Dict, dataset_performance: Dic
         
         if avg_worst_water > 0:
             water_improvement = ((avg_worst_water - avg_best_water) / avg_worst_water) * 100
-            insights.append(f"Water efficiency improvement potential: {water_improvement:.1f}% by choosing best model")
+            insights.append(f"Water efficiency improvement potential: {water_improvement:.1f}% by choosing best model")            
 
     # Dataset complexity insights
     if len(dataset_performance) > 1:
@@ -525,6 +592,42 @@ def generate_research_insights(model_performance: Dict, dataset_performance: Dic
         if not np.isnan(correlation):
             insights.append(f"Overall efficiency and water efficiency correlation: {correlation:.3f}")
 
+    # Parameter efficiency insights
+    if model_parameters:
+        total_params = sum(model_parameters.values())
+        avg_params = total_params / len(model_parameters)
+        
+        insights.append(f"Total parameters analyzed: {total_params:,} across {len(model_parameters)} models")
+        insights.append(f"Average model size: {avg_params:,.0f} parameters")
+        
+        # Parameter distribution
+        large_models = sum(1 for p in model_parameters.values() if p > 1_000_000_000)
+        if large_models > 0:
+            insights.append(f"{large_models}/{len(model_parameters)} models have >1B parameters")
+    
+    # ESS insights
+    if model_ess_scores:
+        avg_ess = sum(model_ess_scores.values()) / len(model_ess_scores)
+        efficient_models = sum(1 for ess in model_ess_scores.values() if ess >= 0.5)
+        
+        insights.append(f"Average ESS score: {avg_ess:.3f}")
+        insights.append(f"Efficient models (ESS ≥ 0.5): {efficient_models}/{len(model_ess_scores)}")
+        
+        if avg_ess < 0.2:
+            insights.append("Overall low ESS scores suggest need for model optimization strategies")
+        elif avg_ess > 0.5:
+            insights.append("Good overall ESS performance indicates efficient model selection")
+        
+        # Best ESS model
+        best_ess_model = max(model_ess_scores.items(), key=lambda x: x[1])
+        insights.append(f"Most environmentally efficient: {best_ess_model[0]} (ESS: {best_ess_model[1]:.3f})")
+    
+    # Parameter-CO2 efficiency
+    if model_parameters and co2_emissions:
+        total_co2 = sum(co2_emissions)
+        param_co2_ratio = total_params / (total_co2 * 1000) if total_co2 > 0 else 0
+        insights.append(f"Overall parameter efficiency: {param_co2_ratio:,.0f} parameters per gram CO₂")
+    
     return insights
 
 
@@ -577,6 +680,290 @@ def save_final_results(overall_results: Dict[str, Any], results_dir: str):
         print("⚠️ pandas not available - skipping CSV export")
 
 
+def _categorize_models_by_size(model_parameters: Dict[str, int]) -> Dict[str, Any]:
+    """Categorize models by parameter count"""
+    size_categories = {
+        "tiny": {"threshold": 10_000_000, "models": []},      # <10M
+        "small": {"threshold": 100_000_000, "models": []},    # 10M-100M
+        "medium": {"threshold": 1_000_000_000, "models": []}, # 100M-1B
+        "large": {"threshold": 10_000_000_000, "models": []}, # 1B-10B
+        "xlarge": {"threshold": float('inf'), "models": []}   # >10B
+    }
+    
+    for model, param_count in model_parameters.items():
+        if param_count < size_categories["tiny"]["threshold"]:
+            size_categories["tiny"]["models"].append({"model": model, "parameters": param_count})
+        elif param_count < size_categories["small"]["threshold"]:
+            size_categories["small"]["models"].append({"model": model, "parameters": param_count})
+        elif param_count < size_categories["medium"]["threshold"]:
+            size_categories["medium"]["models"].append({"model": model, "parameters": param_count})
+        elif param_count < size_categories["large"]["threshold"]:
+            size_categories["large"]["models"].append({"model": model, "parameters": param_count})
+        else:
+            size_categories["xlarge"]["models"].append({"model": model, "parameters": param_count})
+    
+    # Add statistics for each category
+    for category, data in size_categories.items():
+        models = data["models"]
+        data["count"] = len(models)
+        data["total_parameters"] = sum(m["parameters"] for m in models)
+        data["avg_parameters"] = data["total_parameters"] / len(models) if models else 0
+    
+    return size_categories
+
+def _generate_comprehensive_ess_analysis(model_ess_scores: Dict[str, float], 
+                                       framework_ess: Dict[str, List[float]],
+                                       parameter_estimator: ParameterEstimator,
+                                       individual_runs: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate comprehensive ESS analysis for research"""
+    
+    if not model_ess_scores:
+        return {"ess_calculation_disabled": True}
+    
+    # Use parameter estimator's comparison functionality
+    ess_comparison = parameter_estimator.compare_ess_scores(model_ess_scores)
+    
+    # Framework-specific ESS analysis
+    framework_ess_analysis = {}
+    for framework, ess_scores in framework_ess.items():
+        if ess_scores:
+            framework_ess_analysis[framework] = {
+                "average_ess": sum(ess_scores) / len(ess_scores),
+                "best_ess": max(ess_scores),
+                "worst_ess": min(ess_scores),
+                "ess_range": max(ess_scores) - min(ess_scores),
+                "model_count": len(ess_scores),
+                "efficiency_distribution": {
+                    "excellent": sum(1 for ess in ess_scores if ess >= 1.0),
+                    "efficient": sum(1 for ess in ess_scores if 0.5 <= ess < 1.0),
+                    "moderate": sum(1 for ess in ess_scores if 0.1 <= ess < 0.5),
+                    "poor": sum(1 for ess in ess_scores if ess < 0.1)
+                }
+            }
+    
+    # ESS vs other metrics correlation
+    correlations = _calculate_ess_correlations(model_ess_scores, individual_runs)
+    
+    # ESS improvement opportunities
+    improvement_opportunities = _identify_ess_improvement_opportunities(
+        model_ess_scores, individual_runs, parameter_estimator
+    )
+    
+    return {
+        **ess_comparison,
+        "framework_ess_analysis": framework_ess_analysis,
+        "ess_correlations": correlations,
+        "improvement_opportunities": improvement_opportunities,
+        "ess_research_insights": _generate_ess_research_insights(
+            ess_comparison, framework_ess_analysis, correlations
+        )
+    }
+
+
+def _calculate_ess_distribution(model_ess_scores: Dict[str, float], 
+                                       framework_ess: Dict[str, List[float]],
+                                       parameter_estimator: ParameterEstimator,
+                                       individual_runs: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate comprehensive ESS analysis for research"""
+    
+    if not model_ess_scores:
+        return {"ess_calculation_disabled": True}
+    
+    # Use parameter estimator's comparison functionality
+    ess_comparison = parameter_estimator.compare_ess_scores(model_ess_scores)
+    
+    # Framework-specific ESS analysis
+    framework_ess_analysis = {}
+    for framework, ess_scores in framework_ess.items():
+        if ess_scores:
+            framework_ess_analysis[framework] = {
+                "average_ess": sum(ess_scores) / len(ess_scores),
+                "best_ess": max(ess_scores),
+                "worst_ess": min(ess_scores),
+                "ess_range": max(ess_scores) - min(ess_scores),
+                "model_count": len(ess_scores),
+                "efficiency_distribution": {
+                    "excellent": sum(1 for ess in ess_scores if ess >= 1.0),
+                    "efficient": sum(1 for ess in ess_scores if 0.5 <= ess < 1.0),
+                    "moderate": sum(1 for ess in ess_scores if 0.1 <= ess < 0.5),
+                    "poor": sum(1 for ess in ess_scores if ess < 0.1)
+                }
+            }
+    
+    # ESS vs other metrics correlation
+    correlations = _calculate_ess_correlations(model_ess_scores, individual_runs)
+    
+    # ESS improvement opportunities
+    improvement_opportunities = _identify_ess_improvement_opportunities(
+        model_ess_scores, individual_runs, parameter_estimator
+    )
+    
+    return {
+        **ess_comparison,
+        "framework_ess_analysis": framework_ess_analysis,
+        "ess_correlations": correlations,
+        "improvement_opportunities": improvement_opportunities,
+        "ess_research_insights": _generate_ess_research_insights(
+            ess_comparison, framework_ess_analysis, correlations
+        )
+    }
+
+
+def _calculate_ess_correlations(model_ess_scores: Dict[str, float], 
+                              individual_runs: Dict[str, Any]) -> Dict[str, float]:
+    """Calculate correlations between ESS and other metrics"""
+    import numpy as np
+    
+    correlations = {}
+    
+    # Gather data for correlation analysis
+    ess_values = []
+    co2_values = []
+    accuracy_values = []
+    water_values = []
+    
+    for run_id, result in individual_runs.items():
+        model_name = result.get("model_name")
+        if model_name in model_ess_scores:
+            ess_values.append(model_ess_scores[model_name])
+            co2_values.append(result.get("emissions_analysis", {}).get("total_kg_co2", 0))
+            water_values.append(result.get("water_analysis", {}).get("total_water_liters", 0))
+            
+            # Get accuracy metric
+            accuracy_metrics = result.get("accuracy_metrics", {})
+            accuracy = (accuracy_metrics.get("accuracy") or 
+                       accuracy_metrics.get("bleu_score") or 
+                       accuracy_metrics.get("r2_score") or 0)
+            accuracy_values.append(accuracy)
+    
+    # Calculate correlations
+    if len(ess_values) > 1:
+        try:
+            correlations["ess_vs_co2"] = np.corrcoef(ess_values, co2_values)[0, 1]
+            correlations["ess_vs_accuracy"] = np.corrcoef(ess_values, accuracy_values)[0, 1]
+            correlations["ess_vs_water"] = np.corrcoef(ess_values, water_values)[0, 1]
+        except:
+            pass  # Handle cases with constant values
+    
+    return correlations
+
+
+def _identify_ess_improvement_opportunities(model_ess_scores: Dict[str, float],
+                                          individual_runs: Dict[str, Any],
+                                          parameter_estimator: ParameterEstimator) -> Dict[str, Any]:
+    """Identify opportunities for ESS improvement"""
+    
+    opportunities = {
+        "low_efficiency_models": [],
+        "quantization_candidates": [],
+        "architecture_suggestions": [],
+        "framework_recommendations": {}
+    }
+    
+    # Identify low efficiency models
+    for model_name, ess_score in model_ess_scores.items():
+        if ess_score < 0.1:  # Poor ESS threshold
+            # Find the corresponding run
+            model_run = None
+            for run_id, result in individual_runs.items():
+                if result.get("model_name") == model_name:
+                    model_run = result
+                    break
+            
+            if model_run:
+                param_count = model_run.get("model_analysis", {}).get("parameter_count", 0)
+                co2_kg = model_run.get("emissions_analysis", {}).get("total_kg_co2", 0)
+                
+                opportunities["low_efficiency_models"].append({
+                    "model": model_name,
+                    "ess_score": ess_score,
+                    "parameters": param_count,
+                    "co2_kg": co2_kg,
+                    "category": parameter_estimator.categorize_ess(ess_score)
+                })
+        
+        # Identify quantization candidates (large models with moderate ESS)
+        model_run = None
+        for run_id, result in individual_runs.items():
+            if result.get("model_name") == model_name:
+                model_run = result
+                break
+        
+        if model_run:
+            param_count = model_run.get("model_analysis", {}).get("parameter_count", 0)
+            if param_count > 1_000_000_000 and 0.1 <= ess_score < 0.5:  # Large model, moderate ESS
+                opportunities["quantization_candidates"].append({
+                    "model": model_name,
+                    "parameters": param_count,
+                    "ess_score": ess_score,
+                    "potential_improvement": "High (quantization could improve ESS by 30-50%)"
+                })
+    
+    # Framework-specific recommendations
+    framework_ess = {}
+    for run_id, result in individual_runs.items():
+        framework = result.get("framework", "unknown")
+        model_name = result.get("model_name")
+        
+        if model_name in model_ess_scores:
+            if framework not in framework_ess:
+                framework_ess[framework] = []
+            framework_ess[framework].append(model_ess_scores[model_name])
+    
+    for framework, ess_scores in framework_ess.items():
+        if ess_scores:
+            avg_ess = sum(ess_scores) / len(ess_scores)
+            if avg_ess < 0.2:
+                opportunities["framework_recommendations"][framework] = "Consider model optimization or alternative architectures"
+            elif avg_ess > 0.5:
+                opportunities["framework_recommendations"][framework] = "Good ESS performance - maintain current practices"
+    
+    return opportunities
+
+
+def _generate_ess_research_insights(ess_comparison: Dict[str, Any],
+                                  framework_ess_analysis: Dict[str, Any],
+                                  correlations: Dict[str, float]) -> List[str]:
+    """Generate research insights about ESS patterns"""
+    insights = []
+    
+    # Model ranking insights
+    if "summary" in ess_comparison:
+        summary = ess_comparison["summary"]
+        best_model = summary.get("best_model", {})
+        worst_model = summary.get("worst_model", {})
+        
+        if best_model and worst_model:
+            improvement_factor = best_model["ess"] / worst_model["ess"] if worst_model["ess"] > 0 else float('inf')
+            insights.append(f"ESS varies by {improvement_factor:.1f}x across models ({best_model['name']} vs {worst_model['name']})")
+    
+    # Framework insights
+    if framework_ess_analysis:
+        framework_avgs = {fw: data["average_ess"] for fw, data in framework_ess_analysis.items()}
+        best_framework = max(framework_avgs.items(), key=lambda x: x[1])
+        worst_framework = min(framework_avgs.items(), key=lambda x: x[1])
+        
+        insights.append(f"Most efficient framework: {best_framework[0]} (avg ESS: {best_framework[1]:.3f})")
+        
+        if best_framework[1] / worst_framework[1] > 2:
+            insights.append(f"Significant framework efficiency gap: {best_framework[0]} vs {worst_framework[0]}")
+    
+    # Correlation insights
+    if correlations:
+        ess_co2_corr = correlations.get("ess_vs_co2", 0)
+        ess_accuracy_corr = correlations.get("ess_vs_accuracy", 0)
+        
+        if abs(ess_co2_corr) > 0.7:
+            insights.append(f"Strong ESS-CO₂ correlation ({ess_co2_corr:.3f}) - parameter efficiency directly impacts emissions")
+        
+        if ess_accuracy_corr > 0.5:
+            insights.append("Higher ESS models tend to have better accuracy - efficient architectures perform well")
+        elif ess_accuracy_corr < -0.5:
+            insights.append("ESS-accuracy tradeoff observed - larger models may sacrifice efficiency for performance")
+    
+    return insights
+
+
 def analyze_research_results(results: Dict[str, Any]) -> Dict[str, Any]:
     """
     Analyze comprehensive research results and provide insights including water footprint
@@ -601,6 +988,11 @@ def analyze_research_results(results: Dict[str, Any]) -> Dict[str, Any]:
     total_water = analysis["overall_statistics"]["total_water_liters"]
     avg_water = analysis["overall_statistics"]["average_water_per_run_liters"]
     avg_water_efficiency = analysis["overall_statistics"]["average_water_efficiency_score"]
+
+    # Extract ESS analysis
+    ess_analysis = analysis.get("ess_analysis", {})
+    parameter_analysis = analysis.get("parameter_analysis", {})
+        
     
     # Generate recommendations
     recommendations = []
@@ -650,6 +1042,11 @@ def analyze_research_results(results: Dict[str, Any]) -> Dict[str, Any]:
             "water_bottles_equivalent": total_water / 0.5,
             "average_efficiency_score": avg_efficiency,
             "average_water_efficiency_score": avg_water_efficiency,
+            "total_parameters": parameter_analysis.get("total_parameters_analyzed", 0),
+            "average_parameters": parameter_analysis.get("average_parameters_per_model", 0),
+            "average_ess_score": ess_analysis.get("summary", {}).get("average_ess", 0),
+            "best_ess_model": ess_analysis.get("summary", {}).get("best_model", {}),
+            "ess_enabled": not ess_analysis.get("ess_calculation_disabled", False),          
             "total_runs": analysis["overall_statistics"]["total_successful_runs"]
         },
         "recommendations": recommendations,
@@ -665,3 +1062,51 @@ def analyze_research_results(results: Dict[str, Any]) -> Dict[str, Any]:
         ) if model_analysis else [],
         "water_efficiency_potential": improvement_potential
     }
+
+def _generate_ess_optimization_recommendations(ess_analysis: Dict[str, Any]) -> List[str]:
+    """Generate ESS-focused optimization recommendations"""
+    recommendations = []
+    
+    if ess_analysis.get("ess_calculation_disabled"):
+        return ["Enable ESS calculation to get efficiency recommendations"]
+    
+    summary = ess_analysis.get("summary", {})
+    avg_ess = summary.get("average_ess", 0)
+    
+    if avg_ess < 0.1:
+        recommendations.append("Critical: Overall ESS is very low - urgent need for model optimization")
+        recommendations.append("Consider: Model pruning, quantization, or architecture changes")
+    elif avg_ess < 0.3:
+        recommendations.append("Moderate ESS scores - room for significant efficiency improvements")
+        recommendations.append("Investigate: Quantization and model compression techniques")
+    elif avg_ess > 0.7:
+        recommendations.append("Excellent ESS performance - maintain current efficient practices")
+    
+    # Framework-specific recommendations
+    framework_analysis = ess_analysis.get("framework_ess_analysis", {})
+    if framework_analysis:
+        best_framework = max(framework_analysis.items(), key=lambda x: x[1]["average_ess"])
+        recommendations.append(f"Most efficient framework: {best_framework[0]} (avg ESS: {best_framework[1]['average_ess']:.3f})")
+    
+    return recommendations
+
+
+def _generate_parameter_insights(parameter_analysis: Dict[str, Any]) -> List[str]:
+    """Generate parameter-focused insights"""
+    insights = []
+    
+    total_params = parameter_analysis.get("total_parameters_analyzed", 0)
+    if total_params > 0:
+        insights.append(f"Analyzed {total_params:,} total parameters across all models")
+        
+        size_categories = parameter_analysis.get("parameter_distribution", {}).get("size_categories", {})
+        for category, data in size_categories.items():
+            if data["count"] > 0:
+                insights.append(f"{category.capitalize()} models: {data['count']} ({data['total_parameters']:,} params)")
+    
+    sources = parameter_analysis.get("parameter_distribution", {}).get("parameter_sources", {})
+    if sources:
+        most_common_source = max(sources.items(), key=lambda x: x[1])
+        insights.append(f"Parameter estimation: {most_common_source[1]} models used {most_common_source[0]} method")
+    
+    return insights

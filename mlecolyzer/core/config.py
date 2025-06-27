@@ -9,23 +9,17 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 
-
 @dataclass
 class ModelConfig:
     """
-    Configuration for a single model across multiple frameworks
+    Enhanced configuration for a single model with parameter counting support
     
-    Attributes:
-        name: Model name (HuggingFace identifier, sklearn class name, or PyTorch model path/class)
-        task: Task type (text, image, image_generation, audio, classification, regression)
-        framework: Framework type (huggingface, sklearn, pytorch)
-        model_type: Specific model type (optional)
-        max_length: Maximum sequence length for text models
-        quantization: Quantization configuration
-        model_params: Framework-specific model parameters
-        model_class: Custom model class for PyTorch (when using custom models)
-        pretrained: Whether to use pretrained weights (PyTorch)
-        custom_args: Additional model-specific arguments
+    New attributes for parameter counting and ESS:
+        parameter_count: Explicit parameter count (overrides auto-detection)
+        auto_detect_parameters: Enable automatic parameter detection
+        parameter_estimation_method: Preferred method for parameter estimation
+        enable_ess_calculation: Calculate Environmental Sustainability Score
+        ess_target: Target ESS score for optimization recommendations
     """
     name: str
     task: str
@@ -37,6 +31,12 @@ class ModelConfig:
     model_class: Optional[Any] = None
     pretrained: bool = True
     custom_args: Dict[str, Any] = field(default_factory=dict)
+    
+    parameter_count: Optional[int] = None
+    auto_detect_parameters: bool = True
+    parameter_estimation_method: str = "auto"  # auto, pytorch, huggingface, config, fallback
+    enable_ess_calculation: bool = True
+    ess_target: Optional[float] = None  # Target ESS for optimization recommendations
     
     def __post_init__(self):
         """Validate configuration after initialization"""
@@ -51,6 +51,17 @@ class ModelConfig:
         if self.max_length <= 0:
             raise ValueError("max_length must be positive")
         
+        # Validate parameter counting configuration
+        valid_estimation_methods = ["auto", "pytorch", "huggingface", "config", "fallback"]
+        if self.parameter_estimation_method not in valid_estimation_methods:
+            raise ValueError(f"Invalid parameter_estimation_method '{self.parameter_estimation_method}'. Must be one of: {valid_estimation_methods}")
+        
+        if self.parameter_count is not None and self.parameter_count <= 0:
+            raise ValueError("parameter_count must be positive if specified")
+        
+        if self.ess_target is not None and self.ess_target <= 0:
+            raise ValueError("ess_target must be positive if specified")
+        
         # Framework-specific validation
         if self.framework == "sklearn":
             sklearn_tasks = ["classification", "regression"]
@@ -61,15 +72,118 @@ class ModelConfig:
             if self.task in ["text", "image_generation"] and not self.model_class:
                 # For complex tasks, might need custom model class
                 pass
+
+    def get_parameter_config(self) -> Dict[str, Any]:
+        """Get parameter-related configuration"""
+        return {
+            "parameter_count": self.parameter_count,
+            "auto_detect_parameters": self.auto_detect_parameters,
+            "parameter_estimation_method": self.parameter_estimation_method,
+            "enable_ess_calculation": self.enable_ess_calculation,
+            "ess_target": self.ess_target
+        }
+
+    def has_explicit_parameters(self) -> bool:
+        """Check if explicit parameter count is provided"""
+        return self.parameter_count is not None
+
+    def should_auto_detect_parameters(self) -> bool:
+        """Check if auto parameter detection should be performed"""
+        return self.auto_detect_parameters and not self.has_explicit_parameters()
+
+
+# Example configurations with parameter support
+def create_example_configs():
+    """Create example configurations showcasing parameter support"""
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary format"""
-        return asdict(self)
+    examples = {
+        # Explicit parameter count
+        "gpt2_explicit": ModelConfig(
+            name="gpt2",
+            task="text",
+            framework="huggingface",
+            parameter_count=124_000_000,  # Explicit count
+            auto_detect_parameters=False,
+            ess_target=0.5
+        ),
+        
+        # Auto-detection with preferred method
+        "opt_auto_pytorch": ModelConfig(
+            name="facebook/opt-350m",
+            task="text", 
+            framework="huggingface",
+            parameter_estimation_method="pytorch",  # Prefer PyTorch introspection
+            enable_ess_calculation=True
+        ),
+        
+        # sklearn with realistic parameter count
+        "sklearn_explicit": ModelConfig(
+            name="RandomForestClassifier",
+            task="classification",
+            framework="sklearn",
+            parameter_count=500_000,  # Explicit for complex Random Forest
+            model_params={"n_estimators": 100, "max_depth": 10}
+        ),
+        
+        # Large model with ESS target
+        "llama_with_target": ModelConfig(
+            name="meta-llama/Llama-2-7b-hf",
+            task="text",
+            framework="huggingface", 
+            ess_target=0.1,  # Target ESS for optimization
+            enable_ess_calculation=True
+        )
+    }
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ModelConfig':
-        """Create from dictionary"""
-        return cls(**data)
+    return examples
+
+
+def get_parameter_estimation_examples():
+    """Get examples of different parameter estimation scenarios"""
+    return {
+        "tier_1_config": {
+            "description": "User provides explicit parameter count",
+            "config": ModelConfig(
+                name="custom-model",
+                task="text",
+                parameter_count=1_500_000_000
+            ),
+            "expected_source": "config"
+        },
+        
+        "tier_2_pytorch": {
+            "description": "PyTorch model introspection",
+            "config": ModelConfig(
+                name="gpt2",
+                task="text",
+                framework="huggingface",
+                parameter_estimation_method="pytorch"
+            ),
+            "expected_source": "pytorch"
+        },
+        
+        "tier_3_huggingface": {
+            "description": "HuggingFace config introspection",
+            "config": ModelConfig(
+                name="gpt2",
+                task="text",
+                framework="huggingface",
+                parameter_estimation_method="huggingface"
+            ),
+            "expected_source": "huggingface"
+        },
+        
+        "tier_4_fallback": {
+            "description": "Name-based pattern matching",
+            "config": ModelConfig(
+                name="unknown-7b-model",
+                task="text",
+                framework="huggingface",
+                parameter_estimation_method="fallback"
+            ),
+            "expected_source": "fallback"
+        }
+    }
 
 
 @dataclass
